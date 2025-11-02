@@ -10,6 +10,7 @@ find_package(Vulkan REQUIRED)
 
 add_subdirectory(external/glfw)
 add_subdirectory(external/glm)
+add_subdirectory(external/vk-bootstrap)
 
 include_directories(
     PRIVATE
@@ -27,4 +28,5 @@ target_link_libraries(${PROJECT_NAME}
         Vulkan::Vulkan
         glfw
         glm
+        vk-bootstrap::vk-bootstrap
 )
