@@ -290,7 +290,7 @@ void init_sync_structures() {
 
 		// todo do i need? if swapchain image count semaphore
 		VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i]._swapchainSemaphore));
-		VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i]._renderSemaphore));
+		//VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i]._renderSemaphore));
 	}
 
 	_readyForPresentSemaphores.resize(_swapchainImageCount);
@@ -309,7 +309,7 @@ void cleanup() {
 		vkDestroyFence(_device, _frames[i]._renderFence, nullptr);
 
 		// todo do i need? if swapchain image count semaphore
-		vkDestroySemaphore(_device, _frames[i]._renderSemaphore, nullptr);
+		//vkDestroySemaphore(_device, _frames[i]._renderSemaphore, nullptr);
 		vkDestroySemaphore(_device, _frames[i]._swapchainSemaphore, nullptr);
 	}
 
