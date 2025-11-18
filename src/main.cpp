@@ -6,9 +6,13 @@
 #include <vulkan/vk_enum_string_helper.h>
 #include <VkBootstrap.h>
 
+#define VMA_IMPLEMENTATION
+#include <vk_mem_alloc.h>
+
 #include <cstdio>
 #include <cstdint>
 #include <vector>
+#include <deque>
 
 #define VK_CHECK(x)                                                     \
     do {                                                                \
@@ -35,11 +39,31 @@ std::vector<VkImage> _swapchainImages;
 std::vector<VkImageView> _swapchainImageViews;
 VkExtent2D _swapchainExtent;
 
+struct DeletionQueue {
+	std::deque<std::function<void()>> deletors;
+
+	void push_function(std::function<void()>&& function) {
+		deletors.push_back(function);
+	}
+
+	void flush() {
+		// reverse iterate the deletion queue to execute all the functions
+		for (auto it = deletors.rbegin(); it != deletors.rend(); it++) {
+			(*it)(); //call functors
+		}
+
+		deletors.clear();
+	}
+};
+
+DeletionQueue _mainDeletionQueue;
+
 struct FrameData {
 	VkCommandPool _commandPool;
 	VkCommandBuffer _mainCommandBuffer;
 	VkSemaphore _swapchainSemaphore, _renderSemaphore;
 	VkFence _renderFence;
+	DeletionQueue _deletionQueue;
 };
 constexpr unsigned int FRAME_OVERLAP = 2;
 FrameData _frames[FRAME_OVERLAP];
@@ -311,7 +335,10 @@ void cleanup() {
 		// todo do i need? if swapchain image count semaphore
 		//vkDestroySemaphore(_device, _frames[i]._renderSemaphore, nullptr);
 		vkDestroySemaphore(_device, _frames[i]._swapchainSemaphore, nullptr);
+		_frames[i]._deletionQueue.flush();
 	}
+
+	_mainDeletionQueue.flush();
 
 	for (int i = 0; i < _swapchainImageCount; i++)
 		vkDestroySemaphore(_device, _readyForPresentSemaphores[i], nullptr);
@@ -347,6 +374,9 @@ int main() {
 		// wait until the gpu has finished rendering the last frame. Timeout of 1
 		// second
 		VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
+		
+		get_current_frame()._deletionQueue.flush();
+
 		VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._renderFence));
 
 		//request image from the swapchain
