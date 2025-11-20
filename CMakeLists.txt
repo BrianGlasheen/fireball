@@ -2,27 +2,37 @@ cmake_minimum_required(VERSION 3.15)
 
 project(fireball)
 
+option(SHADER_DEBUG "Embed debug information into SPIV shaders" OFF)
+
+file(GLOB_RECURSE GLSL_SOURCE_FILES "src/shaders/*.comp")
+# file(GLOB_RECURSE GLSL_HEADER_FILES "src/shaders/*.h")
+file(GLOB_RECURSE CPP_SOURCE_FILES "src/*.h" "src/*.cpp")
+
 # set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+add_executable(${PROJECT_NAME}
+               ${CPP_SOURCE_FILES}
+               ${GLSL_SOURCE_FILES}
+)
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE GLFW_INCLUDE_NONE GLM_FORCE_XYZW_ONLY GLM_FORCE_QUAT_DATA_XYZW GLM_FORCE_QUAT_CTOR_XYZW)
+
 find_package(Vulkan REQUIRED)
 
-add_subdirectory(external/glfw)
+find_package(glfw3 QUIET)
+if(NOT glfw3_FOUND)
+    message("glfw3 not found, building from source")
+    set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    add_subdirectory(external/glfw)
+endif()
+
 add_subdirectory(external/glm)
 add_subdirectory(external/vk-bootstrap)
 add_subdirectory(external/vma)
-
-include_directories(
-    PRIVATE
-        src
-)
-
-file(GLOB_RECURSE SOURCES
-    "src/*.cpp"
-)
-
-add_executable(${PROJECT_NAME} ${SOURCES})
 
 target_link_libraries(${PROJECT_NAME} 
     PRIVATE
@@ -32,3 +42,28 @@ target_link_libraries(${PROJECT_NAME}
         vk-bootstrap::vk-bootstrap
         GPUOpen::VulkanMemoryAllocator
 )
+
+find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)
+
+set(GLSL_FLAGS --target-env vulkan1.4)
+
+if (SHADER_DEBUG)
+  list(APPEND GLSL_FLAGS -gVS)
+endif()
+
+# Thanks to: https://gist.github.com/evilactually/a0d191701cb48f157b05be7f74d79396
+set(SPIRV_OUTPUT_DIR "${PROJECT_BINARY_DIR}/spirv/")
+foreach(GLSL ${GLSL_SOURCE_FILES})
+  get_filename_component(STEM ${GLSL} NAME_WLE)
+  set(SPIRV "${SPIRV_OUTPUT_DIR}${STEM}.spv")
+  add_custom_command(
+    OUTPUT ${SPIRV}
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${SPIRV_OUTPUT_DIR}"
+    COMMAND ${GLSL_VALIDATOR} -V ${GLSL_FLAGS} ${GLSL} -o ${SPIRV}
+    DEPENDS ${GLSL}
+  )
+  list(APPEND SPIRV_BINARY_FILES ${SPIRV})
+endforeach()
+
+add_custom_target(compile_shaders DEPENDS ${SPIRV_BINARY_FILES})
+add_dependencies(${PROJECT_NAME} compile_shaders)
