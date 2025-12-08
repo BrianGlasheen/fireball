@@ -40,7 +40,7 @@ static void check_vk_result(VkResult err) {
 bool validation_layers = true;
 
 float main_scale;
-uint32_t width = 640, height = 480;
+uint32_t width = 1280, height = 960;
 
 VmaAllocator _allocator;
 
@@ -105,10 +105,6 @@ struct AllocatedImage {
 };
 AllocatedImage _drawImage;
 VkExtent2D _drawExtent;
-
-VkFence _immFence;
-VkCommandBuffer _immCommandBuffer;
-VkCommandPool _immCommandPool;
 
 struct DescriptorLayoutBuilder {
 	std::vector<VkDescriptorSetLayoutBinding> bindings;
@@ -417,17 +413,6 @@ void init_commands() {
 
 		VK_CHECK(vkAllocateCommandBuffers(_device, &cmdAllocInfo, &_frames[i]._mainCommandBuffer));
 	}
-	
-
-	VK_CHECK(vkCreateCommandPool(_device, &commandPoolInfo, nullptr, &_immCommandPool));
-	// allocate the command buffer for immediate submits
-	VkCommandBufferAllocateInfo cmdAllocInfo = command_buffer_allocate_info(_immCommandPool, 1);
-
-	VK_CHECK(vkAllocateCommandBuffers(_device, &cmdAllocInfo, &_immCommandBuffer));
-
-	_mainDeletionQueue.push_function([=]() {
-		vkDestroyCommandPool(_device, _immCommandPool, nullptr);
-	});
 }
 
 VkFenceCreateInfo fence_create_info(VkFenceCreateFlags flags /*= 0*/) {
@@ -587,10 +572,6 @@ void init_sync_structures() {
 	for (int i = 0; i < _swapchainImageCount; i++) {
 		VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_readyForPresentSemaphores[i]));
 	}
-
-
-	VK_CHECK(vkCreateFence(_device, &fenceCreateInfo, nullptr, &_immFence));
-	_mainDeletionQueue.push_function([=]() { vkDestroyFence(_device, _immFence, nullptr); });
 }
 
 void init_descriptors() {
@@ -851,32 +832,6 @@ void init_imgui(GLFWwindow* window) {
 	init_info.CheckVkResultFn = check_vk_result;
 	ImGui_ImplVulkan_Init(&init_info);
 }
-
-void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function) {
-	VK_CHECK(vkResetFences(_device, 1, &_immFence));
-	VK_CHECK(vkResetCommandBuffer(_immCommandBuffer, 0));
-
-	VkCommandBuffer cmd = _immCommandBuffer;
-
-	VkCommandBufferBeginInfo cmdBeginInfo = command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-
-	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
-
-	function(cmd);
-
-	VK_CHECK(vkEndCommandBuffer(cmd));
-
-	VkCommandBufferSubmitInfo cmdinfo = command_buffer_submit_info(cmd);
-	VkSubmitInfo2 submit = submit_info(&cmdinfo, nullptr, nullptr);
-
-	// submit command buffer to the queue and execute it.
-	//  _renderFence will now block until the graphic commands finish execution
-	VK_CHECK(vkQueueSubmit2(_graphicsQueue, 1, &submit, _immFence));
-
-	VK_CHECK(vkWaitForFences(_device, 1, &_immFence, true, 9999999999));
-}
-
-
 
 int main() {
     printf("hello vk\n");
