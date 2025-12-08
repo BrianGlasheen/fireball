@@ -45,7 +45,22 @@ add_executable(
 source_group("ImGui" FILES ${IMGUI_SOURCES})
 source_group("Shaders" FILES ${GLSL_SOURCE_FILES})
 
-target_compile_definitions(${PROJECT_NAME} PRIVATE GLFW_INCLUDE_NONE GLM_FORCE_XYZW_ONLY GLM_FORCE_QUAT_DATA_XYZW GLM_FORCE_QUAT_CTOR_XYZW)
+target_compile_definitions(
+    ${PROJECT_NAME}
+    PRIVATE 
+    GLFW_INCLUDE_NONE
+    GLM_FORCE_XYZW_ONLY
+    GLM_FORCE_QUAT_DATA_XYZW
+    GLM_FORCE_QUAT_CTOR_XYZW
+)
+
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL_PDB OFF CACHE BOOL "" FORCE)
+set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
+set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
 find_package(Vulkan REQUIRED)
 
@@ -61,6 +76,7 @@ endif()
 add_subdirectory(external/glm)
 add_subdirectory(external/vk-bootstrap)
 add_subdirectory(external/vma)
+add_subdirectory(external/assimp)
 
 target_include_directories(${PROJECT_NAME}
     PRIVATE
@@ -75,6 +91,7 @@ target_link_libraries(${PROJECT_NAME}
         glm
         vk-bootstrap::vk-bootstrap
         GPUOpen::VulkanMemoryAllocator
+        assimp
 )
 
 find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)

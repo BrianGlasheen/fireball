@@ -1,4 +1,6 @@
+#include "math.h"
 #include "pipeline.h"
+#include "model_manager.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -196,10 +198,10 @@ struct DescriptorAllocator {
 };
 
 struct ComputePushConstants {
-	glm::vec4 data1;
-	glm::vec4 data2;
-	glm::vec4 data3;
-	glm::vec4 data4;
+	vec4 data1;
+	vec4 data2;
+	vec4 data3;
+	vec4 data4;
 };
 
 struct ComputeEffect {
@@ -217,14 +219,6 @@ struct AllocatedBuffer {
 	VmaAllocationInfo info;
 };
 
-struct Vertex {
-	glm::vec3 position;
-	float uv_x;
-	glm::vec3 normal;
-	float uv_y;
-	glm::vec4 color;
-};
-
 struct GPUMeshBuffers {
 	AllocatedBuffer indexBuffer;
 	AllocatedBuffer vertexBuffer;
@@ -232,7 +226,7 @@ struct GPUMeshBuffers {
 };
 
 struct GPUDrawPushConstants {
-	glm::mat4 worldMatrix;
+	mat4 worldMatrix;
 	VkDeviceAddress vertexBuffer;
 };
 
@@ -768,8 +762,8 @@ void init_background_pipelines() {
 	gradient.layout = _gradientPipelineLayout;
 	gradient.name = "gradient";
 	gradient.data = {};
-	gradient.data.data1 = glm::vec4(1, 0, 0, 1);
-	gradient.data.data2 = glm::vec4(0, 0, 1, 1);
+	gradient.data.data1 = vec4(1, 0, 0, 1);
+	gradient.data.data2 = vec4(0, 0, 1, 1);
 
 	VK_CHECK(vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &gradient.pipeline));
 
@@ -779,7 +773,7 @@ void init_background_pipelines() {
 	sky.layout = _gradientPipelineLayout;
 	sky.name = "sky";
 	sky.data = {};
-	sky.data.data1 = glm::vec4(0.1, 0.2, 0.4, 0.97);
+	sky.data.data1 = vec4(0.1, 0.2, 0.4, 0.97);
 
 	VK_CHECK(vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &sky.pipeline));
 
@@ -1020,7 +1014,7 @@ VkRenderingInfo rendering_info(VkExtent2D renderExtent, VkRenderingAttachmentInf
 	return info;
 }
 
-void draw_geometry(VkCommandBuffer cmd) {
+void draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view) {
 	//begin a render pass  connected to our draw image
 	VkRenderingAttachmentInfo colorAttachment = attachment_info(_drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
@@ -1048,15 +1042,14 @@ void draw_geometry(VkCommandBuffer cmd) {
 
 	vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-	//launch a draw command to draw 3 vertices
-	vkCmdDraw(cmd, 3, 1, 0, 0);
+	vkCmdDraw(cmd, Model_Manager::get_num_vertices(), 1, 0, 0);
 
 	///////////////////////////////////////////////////////////////////////////
 
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _meshPipeline);
 
 	GPUDrawPushConstants push_constants;
-	push_constants.worldMatrix = glm::mat4{ 1.f };
+	push_constants.worldMatrix = projection * view;
 	push_constants.vertexBuffer = rectangle.vertexBufferAddress;
 
 	vkCmdPushConstants(cmd, _meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
@@ -1150,38 +1143,6 @@ void init_imgui(GLFWwindow* window) {
 	init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 	init_info.CheckVkResultFn = check_vk_result;
 	ImGui_ImplVulkan_Init(&init_info);
-}
-
-void show_imgui() {
-	ImGui_ImplVulkan_NewFrame();
-	ImGui_ImplGlfw_NewFrame();
-	ImGui::NewFrame();
-
-	// whole window is dockspace
-	// if doing need to display main render via imgui
-	//ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
-
-	ImGui::ShowDemoWindow();
-	ImGui::Begin("Another Window");
-	ImGui::Text("This can be dragged outside!");
-	ImGui::End();
-	ImGui::Begin("My Window");
-	ImGui::Text("Hello, world!");
-	ImGui::End();
-
-	if (ImGui::Begin("background")) {
-		ComputeEffect& selected = backgroundEffects[currentBackgroundEffect];
-
-		ImGui::Text("Selected effect: ", selected.name);
-		ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, backgroundEffects.size() - 1);
-		ImGui::InputFloat4("data1", (float*)&selected.data.data1);
-		ImGui::InputFloat4("data2", (float*)&selected.data.data2);
-		ImGui::InputFloat4("data3", (float*)&selected.data.data3);
-		ImGui::InputFloat4("data4", (float*)&selected.data.data4);
-	}
-	ImGui::End();
-
-	ImGui::Render();
 }
 
 void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function) {
@@ -1278,30 +1239,31 @@ GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertice
 	return newSurface;
 }
 
-void init_default_data() {
+void init_models() {
 	std::array<Vertex, 4> rect_vertices;
-
 	rect_vertices[0].position = { 0.5,-0.5, 0 };
 	rect_vertices[1].position = { 0.5,0.5, 0 };
 	rect_vertices[2].position = { -0.5,-0.5, 0 };
 	rect_vertices[3].position = { -0.5,0.5, 0 };
-
 	rect_vertices[0].color = { 0,0, 0,1 };
 	rect_vertices[1].color = { 0.5,0.5,0.5 ,1 };
 	rect_vertices[2].color = { 1,0, 0,1 };
 	rect_vertices[3].color = { 0,1, 0,1 };
-
+	
 	std::array<uint32_t, 6> rect_indices;
-
 	rect_indices[0] = 0;
 	rect_indices[1] = 1;
 	rect_indices[2] = 2;
-
 	rect_indices[3] = 2;
 	rect_indices[4] = 1;
 	rect_indices[5] = 3;
 
-	rectangle = uploadMesh(rect_indices, rect_vertices);
+	// get indieces
+	// get vertices
+
+	//rectangle = uploadMesh(rect_indices, rect_vertices);
+	Model_Manager::load_model("submarine/scene.gltf");
+	rectangle = uploadMesh(Model_Manager::get_indices(), Model_Manager::get_vertices());
 
 	//delete the rectangle data on engine shutdown
 	_mainDeletionQueue.push_function([&]() {
@@ -1331,14 +1293,50 @@ int main() {
 	init_sync_structures();
 	init_descriptors();
 	init_pipelines();
-	init_default_data();
+
+	Model_Manager::init("../resources/models/");
+	init_models();
 	
 	init_imgui(window);
+
+	vec3 position = vec3(0, 0, -5);
+	float pitch = 0.0f;
+	float yaw = 0.0f;
+	float zoom = 90.0f;
 
     while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
 
-		show_imgui();
+		ImGui_ImplVulkan_NewFrame();
+		ImGui_ImplGlfw_NewFrame();
+		ImGui::NewFrame();
+
+		if (ImGui::Begin("background")) {
+			ComputeEffect& selected = backgroundEffects[currentBackgroundEffect];
+
+			ImGui::Text("Selected effect: ", selected.name);
+			ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, backgroundEffects.size() - 1);
+			ImGui::InputFloat4("data1", (float*)&selected.data.data1);
+			ImGui::InputFloat4("data2", (float*)&selected.data.data2);
+			ImGui::InputFloat4("data3", (float*)&selected.data.data3);
+			ImGui::InputFloat4("data4", (float*)&selected.data.data4);
+		}
+		ImGui::End();
+
+		if (ImGui::Begin("Camera Controls")) {
+			// Position sliders
+			ImGui::SliderFloat("X", &position.x, -100.0f, 100.0f);
+			ImGui::SliderFloat("Y", &position.y, -100.0f, 100.0f);
+			ImGui::SliderFloat("Z", &position.z, -100.0f, 100.0f);
+
+			ImGui::SliderFloat("Pitch", &pitch, -89.0f, 89.0f);
+			ImGui::SliderFloat("Yaw", &yaw, -180.0f, 180.0f);
+			ImGui::SliderFloat("Zoom", &zoom, -180.0f, 180.0f);
+
+			ImGui::End();
+		}
+
+		ImGui::Render();
 
 		// wait until the gpu has finished rendering the last frame. Timeout of 1
 		// second
@@ -1372,7 +1370,17 @@ int main() {
 
 		transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-		draw_geometry(cmd);
+		glm::vec3 forward;
+		forward.x = cos(glm::radians(pitch)) * sin(glm::radians(yaw));
+		forward.y = sin(glm::radians(pitch));
+		forward.z = cos(glm::radians(pitch)) * cos(glm::radians(yaw));
+		forward = glm::normalize(forward);
+		glm::vec3 target = position + forward;
+		glm::vec3 up = glm::vec3(0, 1, 0);
+		mat4 view = glm::lookAt(position, target, up);
+		mat4 projection = glm::perspective(glm::radians(zoom), (float)_drawExtent.width / (float)_drawExtent.height, 10000.f, 0.1f);
+		projection[1][1] *= -1;
+		draw_geometry(cmd, projection, view);
 
 		transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 		transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
