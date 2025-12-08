@@ -8,14 +8,29 @@ file(GLOB_RECURSE GLSL_SOURCE_FILES "src/shaders/*.comp")
 # file(GLOB_RECURSE GLSL_HEADER_FILES "src/shaders/*.h")
 file(GLOB_RECURSE CPP_SOURCE_FILES "src/*.h" "src/*.cpp")
 
+set(IMGUI_SOURCES
+    "external/imgui/imgui.cpp"
+    "external/imgui/imgui_demo.cpp"
+    "external/imgui/imgui_draw.cpp"
+    "external/imgui/imgui_tables.cpp"
+    "external/imgui/imgui_widgets.cpp"
+    "external/imgui/backends/imgui_impl_glfw.cpp"
+    "external/imgui/backends/imgui_impl_vulkan.cpp"
+)
+
 # set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 add_executable(${PROJECT_NAME}
-               ${CPP_SOURCE_FILES}
-               ${GLSL_SOURCE_FILES}
+    ${CPP_SOURCE_FILES}
+    ${GLSL_SOURCE_FILES}
+    ${IMGUI_SOURCES}
 )
+
+# visual studio stuff
+source_group("ImGui" FILES ${IMGUI_SOURCES})
+source_group("Shaders" FILES ${GLSL_SOURCE_FILES})
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE GLFW_INCLUDE_NONE GLM_FORCE_XYZW_ONLY GLM_FORCE_QUAT_DATA_XYZW GLM_FORCE_QUAT_CTOR_XYZW)
 
@@ -33,6 +48,12 @@ endif()
 add_subdirectory(external/glm)
 add_subdirectory(external/vk-bootstrap)
 add_subdirectory(external/vma)
+
+target_include_directories(${PROJECT_NAME}
+    PRIVATE
+        "external/imgui"
+        "external/imgui/backends"
+)
 
 target_link_libraries(${PROJECT_NAME} 
     PRIVATE
