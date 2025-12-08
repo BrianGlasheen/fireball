@@ -189,6 +189,25 @@ struct DescriptorAllocator {
 	}
 };
 
+struct ComputePushConstants {
+	glm::vec4 data1;
+	glm::vec4 data2;
+	glm::vec4 data3;
+	glm::vec4 data4;
+};
+
+struct ComputeEffect {
+	const char* name;
+
+	VkPipeline pipeline;
+	VkPipelineLayout layout;
+
+	ComputePushConstants data;
+};
+
+std::vector<ComputeEffect> backgroundEffects;
+int currentBackgroundEffect{ 0 };
+
 DescriptorAllocator globalDescriptorAllocator;
 VkDescriptorSet _drawImageDescriptors;
 VkDescriptorSetLayout _drawImageDescriptorLayout;
@@ -663,10 +682,24 @@ void init_background_pipelines() {
 	computeLayout.pSetLayouts = &_drawImageDescriptorLayout;
 	computeLayout.setLayoutCount = 1;
 
+	VkPushConstantRange pushConstant{};
+	pushConstant.offset = 0;
+	pushConstant.size = sizeof(ComputePushConstants);
+	pushConstant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	computeLayout.pPushConstantRanges = &pushConstant;
+	computeLayout.pushConstantRangeCount = 1;
+
 	VK_CHECK(vkCreatePipelineLayout(_device, &computeLayout, nullptr, &_gradientPipelineLayout));
 
-	VkShaderModule computeDrawShader;
-	if (!load_shader_module("spirv/gradient.spv", _device, &computeDrawShader)) {
+	VkShaderModule gradientShader;
+	if (!load_shader_module("spirv/gradient_color.spv", _device, &gradientShader)) {
+		printf("Error when building the compute shader\n");
+		assert(false);
+	}
+
+	VkShaderModule skyShader;
+	if (!load_shader_module("spirv/sky.spv", _device, &skyShader)) {
 		printf("Error when building the compute shader\n");
 		assert(false);
 	}
@@ -675,7 +708,7 @@ void init_background_pipelines() {
 	stageinfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	stageinfo.pNext = nullptr;
 	stageinfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-	stageinfo.module = computeDrawShader;
+	stageinfo.module = gradientShader;
 	stageinfo.pName = "main";
 
 	VkComputePipelineCreateInfo computePipelineCreateInfo{};
@@ -684,13 +717,35 @@ void init_background_pipelines() {
 	computePipelineCreateInfo.layout = _gradientPipelineLayout;
 	computePipelineCreateInfo.stage = stageinfo;
 
-	VK_CHECK(vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &_gradientPipeline));
+	ComputeEffect gradient;
+	gradient.layout = _gradientPipelineLayout;
+	gradient.name = "gradient";
+	gradient.data = {};
+	gradient.data.data1 = glm::vec4(1, 0, 0, 1);
+	gradient.data.data2 = glm::vec4(0, 0, 1, 1);
 
-	vkDestroyShaderModule(_device, computeDrawShader, nullptr);
+	VK_CHECK(vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &gradient.pipeline));
 
-	_mainDeletionQueue.push_function([&]() {
+	// change to create sky shader
+	computePipelineCreateInfo.stage.module = skyShader;
+	ComputeEffect sky;
+	sky.layout = _gradientPipelineLayout;
+	sky.name = "sky";
+	sky.data = {};
+	sky.data.data1 = glm::vec4(0.1, 0.2, 0.4, 0.97);
+
+	VK_CHECK(vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1, &computePipelineCreateInfo, nullptr, &sky.pipeline));
+
+	backgroundEffects.push_back(gradient);
+	backgroundEffects.push_back(sky);
+
+	vkDestroyShaderModule(_device, gradientShader, nullptr);
+	vkDestroyShaderModule(_device, skyShader, nullptr);
+
+	_mainDeletionQueue.push_function([=]() {
 		vkDestroyPipelineLayout(_device, _gradientPipelineLayout, nullptr);
-		vkDestroyPipeline(_device, _gradientPipeline, nullptr);
+		vkDestroyPipeline(_device, sky.pipeline, nullptr);
+		vkDestroyPipeline(_device, gradient.pipeline, nullptr);
 	});
 }
 
@@ -738,11 +793,14 @@ void draw_background(VkCommandBuffer cmd) {
 	//clear image
 	//vkCmdClearColorImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
 
-	// bind the gradient drawing compute pipeline
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _gradientPipeline);
+	ComputeEffect& effect = backgroundEffects[currentBackgroundEffect];
+
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, effect.pipeline);
 
 	// bind the descriptor set containing the draw image for the compute pipeline
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _gradientPipelineLayout, 0, 1, &_drawImageDescriptors, 0, nullptr);
+
+	vkCmdPushConstants(cmd, _gradientPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &effect.data);
 
 	// execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
 	vkCmdDispatch(cmd, std::ceil(_drawExtent.width / 16.0), std::ceil(_drawExtent.height / 16.0), 1);
@@ -833,6 +891,38 @@ void init_imgui(GLFWwindow* window) {
 	ImGui_ImplVulkan_Init(&init_info);
 }
 
+void show_imgui() {
+	ImGui_ImplVulkan_NewFrame();
+	ImGui_ImplGlfw_NewFrame();
+	ImGui::NewFrame();
+
+	// whole window is dockspace
+	// if doing need to display main render via imgui
+	//ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
+
+	ImGui::ShowDemoWindow();
+	ImGui::Begin("Another Window");
+	ImGui::Text("This can be dragged outside!");
+	ImGui::End();
+	ImGui::Begin("My Window");
+	ImGui::Text("Hello, world!");
+	ImGui::End();
+
+	if (ImGui::Begin("background")) {
+		ComputeEffect& selected = backgroundEffects[currentBackgroundEffect];
+
+		ImGui::Text("Selected effect: ", selected.name);
+		ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, backgroundEffects.size() - 1);
+		ImGui::InputFloat4("data1", (float*)&selected.data.data1);
+		ImGui::InputFloat4("data2", (float*)&selected.data.data2);
+		ImGui::InputFloat4("data3", (float*)&selected.data.data3);
+		ImGui::InputFloat4("data4", (float*)&selected.data.data4);
+	}
+	ImGui::End();
+
+	ImGui::Render();
+}
+
 int main() {
     printf("hello vk\n");
     
@@ -859,23 +949,7 @@ int main() {
     while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
 
-		ImGui_ImplVulkan_NewFrame();
-		ImGui_ImplGlfw_NewFrame();
-		ImGui::NewFrame();
-
-		// whole window is dockspace
-		// if doing need to display main render via imgui
-		//ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
-
-		ImGui::ShowDemoWindow();
-		ImGui::Begin("Another Window");
-			ImGui::Text("This can be dragged outside!");
-		ImGui::End();
-		ImGui::Begin("My Window");
-			ImGui::Text("Hello, world!");
-		ImGui::End();
-		
-		ImGui::Render();
+		show_imgui();
 
 		// wait until the gpu has finished rendering the last frame. Timeout of 1
 		// second
