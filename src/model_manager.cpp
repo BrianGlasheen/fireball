@@ -177,8 +177,13 @@ namespace Model_Manager {
     std::vector<Vertex>& get_vertices() {
         return g_vertices;
     }
+    
     std::vector<uint32_t>& get_indices() {
         return g_indices;
+    }
+
+    std::vector<Model>& get_models() {
+        return g_models;
     }
 
     Model& get_model(Model_Handle handle) {

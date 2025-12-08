@@ -48,6 +48,7 @@ namespace Model_Manager {
 
     std::vector<Vertex>& get_vertices();
     std::vector<uint32_t>& get_indices();
+    std::vector<Model>& get_models();
     size_t get_num_vertices();
     size_t get_num_vertices(Model_Handle handle);
     size_t get_num_indices();

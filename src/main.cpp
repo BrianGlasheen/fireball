@@ -1042,21 +1042,26 @@ void draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view
 
 	vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-	vkCmdDraw(cmd, Model_Manager::get_num_vertices(), 1, 0, 0);
+	vkCmdDraw(cmd, 3, 1, 0, 0);
 
 	///////////////////////////////////////////////////////////////////////////
 
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _meshPipeline);
 
 	GPUDrawPushConstants push_constants;
-	push_constants.worldMatrix = projection * view;
 	push_constants.vertexBuffer = rectangle.vertexBufferAddress;
-
-	vkCmdPushConstants(cmd, _meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
 	vkCmdBindIndexBuffer(cmd, rectangle.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
-	vkCmdDrawIndexed(cmd, 6, 1, 0, 0, 0);
+	for (Model& model : Model_Manager::get_models()) {
+		for (Mesh& mesh : model.meshes) {
+			push_constants.worldMatrix = projection * view * mesh.transform;
 
+			vkCmdPushConstants(cmd, _meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+
+			vkCmdDrawIndexed(cmd, mesh.index_count, 1, mesh.base_index, mesh.base_vertex, 0);
+		}
+	}
+	
 	vkCmdEndRendering(cmd);
 }
 
@@ -1325,9 +1330,9 @@ int main() {
 
 		if (ImGui::Begin("Camera Controls")) {
 			// Position sliders
-			ImGui::SliderFloat("X", &position.x, -100.0f, 100.0f);
-			ImGui::SliderFloat("Y", &position.y, -100.0f, 100.0f);
-			ImGui::SliderFloat("Z", &position.z, -100.0f, 100.0f);
+			ImGui::SliderFloat("X", &position.x, -500.0f, 500.0f);
+			ImGui::SliderFloat("Y", &position.y, -500.0f, 500.0f);
+			ImGui::SliderFloat("Z", &position.z, -500.0f, 500.0f);
 
 			ImGui::SliderFloat("Pitch", &pitch, -89.0f, 89.0f);
 			ImGui::SliderFloat("Yaw", &yaw, -180.0f, 180.0f);
@@ -1378,7 +1383,7 @@ int main() {
 		glm::vec3 target = position + forward;
 		glm::vec3 up = glm::vec3(0, 1, 0);
 		mat4 view = glm::lookAt(position, target, up);
-		mat4 projection = glm::perspective(glm::radians(zoom), (float)_drawExtent.width / (float)_drawExtent.height, 10000.f, 0.1f);
+		mat4 projection = glm::perspective(glm::radians(zoom), (float)_drawExtent.width / (float)_drawExtent.height, 0.1f, 10000.f);
 		projection[1][1] *= -1;
 		draw_geometry(cmd, projection, view);
 
@@ -1387,7 +1392,6 @@ int main() {
 		
 		// execute a copy from the draw image into the swapchain
 		copy_image_to_image(cmd, _drawImage.image, _swapchainImages[swapchainImageIndex], _drawExtent, _swapchainExtent);
-
 
 		VkRenderingAttachmentInfo colorAttachment = {};
 		colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
