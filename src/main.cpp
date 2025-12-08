@@ -1,3 +1,5 @@
+#include "pipeline.h"
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
@@ -20,13 +22,13 @@
 #include <span>
 #include <fstream>
 
-#define VK_CHECK(x)                                                      \
-    do {                                                                 \
-        VkResult err = x;                                                \
-        if (err) {                                                       \
-            printf("Detected Vulkan error: %s\n", string_VkResult(err)); \
-            abort();                                                     \
-        }                                                                \
+#define VK_CHECK(x)																  \
+    do {																		  \
+        VkResult err = x;														  \
+        if (err) {																  \
+            fprintf(stderr, "Detected Vulkan error: %s\n", string_VkResult(err)); \
+            abort();															  \
+        }																		  \
     } while (0)
 
 static void check_vk_result(VkResult err) {
@@ -693,13 +695,13 @@ void init_background_pipelines() {
 	VK_CHECK(vkCreatePipelineLayout(_device, &computeLayout, nullptr, &_gradientPipelineLayout));
 
 	VkShaderModule gradientShader;
-	if (!load_shader_module("spirv/gradient_color.spv", _device, &gradientShader)) {
+	if (!load_shader_module("spirv/gradient_color.comp.spv", _device, &gradientShader)) {
 		printf("Error when building the compute shader\n");
 		assert(false);
 	}
 
 	VkShaderModule skyShader;
-	if (!load_shader_module("spirv/sky.spv", _device, &skyShader)) {
+	if (!load_shader_module("spirv/sky.comp.spv", _device, &skyShader)) {
 		printf("Error when building the compute shader\n");
 		assert(false);
 	}
@@ -749,8 +751,78 @@ void init_background_pipelines() {
 	});
 }
 
+VkPipelineLayout _trianglePipelineLayout;
+VkPipeline _trianglePipeline;
+
+VkPipelineLayoutCreateInfo pipeline_layout_create_info() {
+	VkPipelineLayoutCreateInfo info{};
+	info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	info.pNext = nullptr;
+	info.flags = 0;
+	info.setLayoutCount = 0;
+	info.pSetLayouts = nullptr;
+	info.pushConstantRangeCount = 0;
+	info.pPushConstantRanges = nullptr;
+	return info;
+}
+
+void init_triangle_pipeline() {
+	VkShaderModule triangleVertexShader;
+	if (!load_shader_module("spirv/tri.vert.spv", _device, &triangleVertexShader)) {
+		fprintf(stderr, "Error when building the triangle fragment shader module");
+		assert(false);
+	}
+
+	VkShaderModule triangleFragShader;
+	if (!load_shader_module("spirv/tri.frag.spv", _device, &triangleFragShader)) {
+		fprintf(stderr, "Error when building the triangle vertex shader module");
+		assert(false);
+	}
+
+	//build the pipeline layout that controls the inputs/outputs of the shader
+	//we are not using descriptor sets or other systems yet, so no need to use anything other than empty default
+	VkPipelineLayoutCreateInfo pipeline_layout_info = pipeline_layout_create_info();
+	VK_CHECK(vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr, &_trianglePipelineLayout));
+
+	Pipeline_Builder pipelineBuilder;
+
+	//use the triangle layout we created
+	pipelineBuilder._pipelineLayout = _trianglePipelineLayout;
+	//connecting the vertex and pixel shaders to the pipeline
+	pipelineBuilder.set_shaders(triangleVertexShader, triangleFragShader);
+	//it will draw triangles
+	pipelineBuilder.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+	//filled triangles
+	pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
+	//no backface culling
+	pipelineBuilder.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
+	//no multisampling
+	pipelineBuilder.set_multisampling_none();
+	//no blending
+	pipelineBuilder.disable_blending();
+	//no depth testing
+	pipelineBuilder.disable_depthtest();
+
+	//connect the image format we will draw into, from draw image
+	pipelineBuilder.set_color_attachment_format(_drawImage.imageFormat);
+	pipelineBuilder.set_depth_format(VK_FORMAT_UNDEFINED);
+
+	//finally build the pipeline
+	_trianglePipeline = pipelineBuilder.build_pipeline(_device);
+
+	//clean structures
+	vkDestroyShaderModule(_device, triangleFragShader, nullptr);
+	vkDestroyShaderModule(_device, triangleVertexShader, nullptr);
+
+	_mainDeletionQueue.push_function([&]() {
+		vkDestroyPipelineLayout(_device, _trianglePipelineLayout, nullptr);
+		vkDestroyPipeline(_device, _trianglePipeline, nullptr);
+	});
+}
+
 void init_pipelines() {
 	init_background_pipelines();
+	init_triangle_pipeline();
 }
 
 void cleanup() {
@@ -804,6 +876,69 @@ void draw_background(VkCommandBuffer cmd) {
 
 	// execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
 	vkCmdDispatch(cmd, std::ceil(_drawExtent.width / 16.0), std::ceil(_drawExtent.height / 16.0), 1);
+}
+
+VkRenderingAttachmentInfo attachment_info( VkImageView view, VkClearValue* clear, VkImageLayout layout /*= VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL*/) {
+	VkRenderingAttachmentInfo colorAttachment{};
+	colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+	colorAttachment.pNext = nullptr;
+
+	colorAttachment.imageView = view;
+	colorAttachment.imageLayout = layout;
+	colorAttachment.loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	if (clear) {
+		colorAttachment.clearValue = *clear;
+	}
+
+	return colorAttachment;
+}
+
+VkRenderingInfo rendering_info(VkExtent2D renderExtent, VkRenderingAttachmentInfo* colorAttachment, VkRenderingAttachmentInfo* depthAttachment) {
+	VkRenderingInfo info{};
+	info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+	info.pNext = nullptr;
+	info.renderArea = VkRect2D{ VkOffset2D{0, 0}, renderExtent };
+	info.layerCount = 1;
+	info.colorAttachmentCount = 1;
+	info.pColorAttachments = colorAttachment;
+	info.pDepthAttachment = depthAttachment;
+	info.pStencilAttachment = nullptr;
+	return info;
+}
+
+void draw_geometry(VkCommandBuffer cmd) {
+	//begin a render pass  connected to our draw image
+	VkRenderingAttachmentInfo colorAttachment = attachment_info(_drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+	VkRenderingInfo renderInfo = rendering_info(_drawExtent, &colorAttachment, nullptr);
+	vkCmdBeginRendering(cmd, &renderInfo);
+
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _trianglePipeline);
+
+	//set dynamic viewport and scissor
+	VkViewport viewport = {};
+	viewport.x = 0;
+	viewport.y = 0;
+	viewport.width = _drawExtent.width;
+	viewport.height = _drawExtent.height;
+	viewport.minDepth = 0.f;
+	viewport.maxDepth = 1.f;
+
+	vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+	VkRect2D scissor = {};
+	scissor.offset.x = 0;
+	scissor.offset.y = 0;
+	scissor.extent.width = _drawExtent.width;
+	scissor.extent.height = _drawExtent.height;
+
+	vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+	//launch a draw command to draw 3 vertices
+	vkCmdDraw(cmd, 3, 1, 0, 0);
+
+	vkCmdEndRendering(cmd);
 }
 
 void init_imgui(GLFWwindow* window) {
@@ -981,7 +1116,11 @@ int main() {
 
 		draw_background(cmd);
 
-		transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+		transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+		draw_geometry(cmd);
+
+		transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 		transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 		
 		// execute a copy from the draw image into the swapchain

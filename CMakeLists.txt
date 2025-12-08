@@ -4,11 +4,23 @@ project(fireball)
 
 option(SHADER_DEBUG "Embed debug information into SPIV shaders" OFF)
 
-file(GLOB_RECURSE GLSL_SOURCE_FILES "src/shaders/*.comp")
+file(
+    GLOB_RECURSE
+    GLSL_SOURCE_FILES
+    "src/shaders/*.comp"
+    "src/shaders/*.vert"
+    "src/shaders/*.frag"
+)
 # file(GLOB_RECURSE GLSL_HEADER_FILES "src/shaders/*.h")
-file(GLOB_RECURSE CPP_SOURCE_FILES "src/*.h" "src/*.cpp")
+file(
+    GLOB_RECURSE
+    CPP_SOURCE_FILES
+    "src/*.h"
+    "src/*.cpp"
+)
 
-set(IMGUI_SOURCES
+set(
+    IMGUI_SOURCES
     "external/imgui/imgui.cpp"
     "external/imgui/imgui_demo.cpp"
     "external/imgui/imgui_draw.cpp"
@@ -22,7 +34,8 @@ set(IMGUI_SOURCES
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-add_executable(${PROJECT_NAME}
+add_executable(
+    ${PROJECT_NAME}
     ${CPP_SOURCE_FILES}
     ${GLSL_SOURCE_FILES}
     ${IMGUI_SOURCES}
@@ -75,7 +88,7 @@ endif()
 # Thanks to: https://gist.github.com/evilactually/a0d191701cb48f157b05be7f74d79396
 set(SPIRV_OUTPUT_DIR "${PROJECT_BINARY_DIR}/spirv/")
 foreach(GLSL ${GLSL_SOURCE_FILES})
-  get_filename_component(STEM ${GLSL} NAME_WLE)
+  get_filename_component(STEM ${GLSL} NAME)
   set(SPIRV "${SPIRV_OUTPUT_DIR}${STEM}.spv")
   add_custom_command(
     OUTPUT ${SPIRV}

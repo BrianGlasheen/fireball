@@ -1,4 +1,4 @@
-#version 460
+#version 450
 
 #extension GL_KHR_vulkan_glsl: enable
 
@@ -78,8 +78,7 @@ void mainImage( out vec4 fragColor, in vec2 fragCoord )
 
 
 
-void main() 
-{
+void main() {
 	vec4 value = vec4(0.0, 0.0, 0.0, 1.0);
     ivec2 texelCoord = ivec2(gl_GlobalInvocationID.xy);
 	ivec2 size = imageSize(image);
