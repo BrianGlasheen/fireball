@@ -45,6 +45,8 @@ bool validation_layers = true;
 
 float main_scale;
 uint32_t width = 1280, height = 960;
+bool resize_requested = false;
+float renderScale = 1.0f;
 
 VmaAllocator _allocator;
 
@@ -111,7 +113,9 @@ struct AllocatedImage {
 	VkExtent3D imageExtent;
 	VkFormat imageFormat;
 };
+
 AllocatedImage _drawImage;
+AllocatedImage _depthImage;
 VkExtent2D _drawExtent;
 
 struct DescriptorLayoutBuilder {
@@ -363,7 +367,7 @@ VkCommandBufferAllocateInfo command_buffer_allocate_info(VkCommandPool pool, uin
 }
 
 void create_swapchain(uint32_t width, uint32_t height) {
-	vkb::SwapchainBuilder swapchainBuilder{ _chosenGPU,_device,_surface };
+	vkb::SwapchainBuilder swapchainBuilder{ _chosenGPU, _device, _surface };
 
 	_swapchainImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
 
@@ -375,24 +379,24 @@ void create_swapchain(uint32_t width, uint32_t height) {
 		.set_desired_extent(width, height)
 		.add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
 		.build()
-	.value();
+		.value();
 
 	_swapchainExtent = vkbSwapchain.extent;
 	//store swapchain and its related images
 	_swapchain = vkbSwapchain.swapchain;
 	_swapchainImages = vkbSwapchain.get_images().value();
 	_swapchainImageViews = vkbSwapchain.get_image_views().value();
+}
+
+void init_swapchain(uint32_t width, uint32_t height) {
+	create_swapchain(width, height);
 
 	// Set _swapchainImageCount to the amount of swapchain images - used to initialize the same amount of 
 	// _readyForPresentSemaphores in init_sync_structures
 	VK_CHECK(vkGetSwapchainImagesKHR(_device, _swapchain, &_swapchainImageCount, nullptr));
 
 	//draw image size will match the window
-	VkExtent3D drawImageExtent = {
-		width,
-		height,
-		1
-	};
+	VkExtent3D drawImageExtent = { width, height, 1 };
 
 	//hardcoding the draw format to 32 bit float
 	_drawImage.imageFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -419,10 +423,27 @@ void create_swapchain(uint32_t width, uint32_t height) {
 
 	VK_CHECK(vkCreateImageView(_device, &rview_info, nullptr, &_drawImage.imageView));
 
-	//add to deletion queues
+	// depth image
+	_depthImage.imageFormat = VK_FORMAT_D32_SFLOAT;
+	_depthImage.imageExtent = drawImageExtent;
+	VkImageUsageFlags depthImageUsages{};
+	depthImageUsages |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+
+	VkImageCreateInfo dimg_info = image_create_info(_depthImage.imageFormat, depthImageUsages, drawImageExtent);
+
+	vmaCreateImage(_allocator, &dimg_info, &rimg_allocinfo, &_depthImage.image, &_depthImage.allocation, nullptr);
+
+	//build a image-view for the draw image to use for rendering
+	VkImageViewCreateInfo dview_info = imageview_create_info(_depthImage.imageFormat, _depthImage.image, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+	VK_CHECK(vkCreateImageView(_device, &dview_info, nullptr, &_depthImage.imageView));
+
 	_mainDeletionQueue.push_function([=]() {
 		vkDestroyImageView(_device, _drawImage.imageView, nullptr);
 		vmaDestroyImage(_allocator, _drawImage.image, _drawImage.allocation);
+
+		vkDestroyImageView(_device, _depthImage.imageView, nullptr);
+		vmaDestroyImage(_allocator, _depthImage.image, _depthImage.allocation);
 	});
 }
 
@@ -790,9 +811,6 @@ void init_background_pipelines() {
 	});
 }
 
-VkPipelineLayout _trianglePipelineLayout;
-VkPipeline _trianglePipeline;
-
 VkPipelineLayoutCreateInfo pipeline_layout_create_info() {
 	VkPipelineLayoutCreateInfo info{};
 	info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -805,74 +823,20 @@ VkPipelineLayoutCreateInfo pipeline_layout_create_info() {
 	return info;
 }
 
-void init_triangle_pipeline() {
-	VkShaderModule triangleVertexShader;
-	if (!load_shader_module("spirv/tri.vert.spv", _device, &triangleVertexShader)) {
-		fprintf(stderr, "Error when building the triangle fragment shader module");
-		assert(false);
-	}
+VkPipelineLayout _opaquePipelineLayout;
+VkPipeline _opaquePipeline;
 
-	VkShaderModule triangleFragShader;
-	if (!load_shader_module("spirv/tri.frag.spv", _device, &triangleFragShader)) {
+GPUMeshBuffers geometry_buffer;
+
+void init_opaque_pipeline() {
+	VkShaderModule vertex;
+	if (!load_shader_module("spirv/tri_mesh.vert.spv", _device, &vertex)) {
 		fprintf(stderr, "Error when building the triangle vertex shader module");
 		assert(false);
 	}
 
-	//build the pipeline layout that controls the inputs/outputs of the shader
-	//we are not using descriptor sets or other systems yet, so no need to use anything other than empty default
-	VkPipelineLayoutCreateInfo pipeline_layout_info = pipeline_layout_create_info();
-	VK_CHECK(vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr, &_trianglePipelineLayout));
-
-	Pipeline_Builder pipelineBuilder;
-
-	//use the triangle layout we created
-	pipelineBuilder._pipelineLayout = _trianglePipelineLayout;
-	//connecting the vertex and pixel shaders to the pipeline
-	pipelineBuilder.set_shaders(triangleVertexShader, triangleFragShader);
-	//it will draw triangles
-	pipelineBuilder.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-	//filled triangles
-	pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
-	//no backface culling
-	pipelineBuilder.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
-	//no multisampling
-	pipelineBuilder.set_multisampling_none();
-	//no blending
-	pipelineBuilder.disable_blending();
-	//no depth testing
-	pipelineBuilder.disable_depthtest();
-
-	//connect the image format we will draw into, from draw image
-	pipelineBuilder.set_color_attachment_format(_drawImage.imageFormat);
-	pipelineBuilder.set_depth_format(VK_FORMAT_UNDEFINED);
-
-	//finally build the pipeline
-	_trianglePipeline = pipelineBuilder.build_pipeline(_device);
-
-	//clean structures
-	vkDestroyShaderModule(_device, triangleFragShader, nullptr);
-	vkDestroyShaderModule(_device, triangleVertexShader, nullptr);
-
-	_mainDeletionQueue.push_function([&]() {
-		vkDestroyPipelineLayout(_device, _trianglePipelineLayout, nullptr);
-		vkDestroyPipeline(_device, _trianglePipeline, nullptr);
-	});
-}
-
-VkPipelineLayout _meshPipelineLayout;
-VkPipeline _meshPipeline;
-
-GPUMeshBuffers rectangle;
-
-void init_mesh_pipeline() {
-	VkShaderModule triangleVertexShader;
-	if (!load_shader_module("spirv/tri_mesh.vert.spv", _device, &triangleVertexShader)) {
-		fprintf(stderr, "Error when building the triangle vertex shader module");
-		assert(false);
-	}
-
-	VkShaderModule triangleFragShader;
-	if (!load_shader_module("spirv/tri.frag.spv", _device, &triangleFragShader)) {
+	VkShaderModule fragment;
+	if (!load_shader_module("spirv/tri.frag.spv", _device, &fragment)) {
 		fprintf(stderr, "Error when building the triangle fragment shader module");
 		assert(false);
 	}
@@ -886,41 +850,32 @@ void init_mesh_pipeline() {
 	pipeline_layout_info.pPushConstantRanges = &bufferRange;
 	pipeline_layout_info.pushConstantRangeCount = 1;
 
-	VK_CHECK(vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr, &_meshPipelineLayout));
+	VK_CHECK(vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr, &_opaquePipelineLayout));
 
 	Pipeline_Builder pipelineBuilder;
 
 	//use the triangle layout we created
-	pipelineBuilder._pipelineLayout = _meshPipelineLayout;
-	//connecting the vertex and pixel shaders to the pipeline
-	pipelineBuilder.set_shaders(triangleVertexShader, triangleFragShader);
-	//it will draw triangles
+	pipelineBuilder._pipelineLayout = _opaquePipelineLayout;
+	pipelineBuilder.set_shaders(vertex, fragment);
 	pipelineBuilder.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-	//filled triangles
 	pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
-	//no backface culling
 	pipelineBuilder.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
-	//no multisampling
 	pipelineBuilder.set_multisampling_none();
-	//no blending
 	pipelineBuilder.disable_blending();
+	pipelineBuilder.enable_depthtest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
 
-	pipelineBuilder.disable_depthtest();
-
-	//connect the image format we will draw into, from draw image
 	pipelineBuilder.set_color_attachment_format(_drawImage.imageFormat);
-	pipelineBuilder.set_depth_format(VK_FORMAT_UNDEFINED);
+	pipelineBuilder.set_depth_format(_depthImage.imageFormat);
 
-	//finally build the pipeline
-	_meshPipeline = pipelineBuilder.build_pipeline(_device);
+	_opaquePipeline = pipelineBuilder.build_pipeline(_device);
 
 	//clean structures
-	vkDestroyShaderModule(_device, triangleFragShader, nullptr);
-	vkDestroyShaderModule(_device, triangleVertexShader, nullptr);
+	vkDestroyShaderModule(_device, fragment, nullptr);
+	vkDestroyShaderModule(_device, vertex, nullptr);
 
 	_mainDeletionQueue.push_function([&]() {
-		vkDestroyPipelineLayout(_device, _meshPipelineLayout, nullptr);
-		vkDestroyPipeline(_device, _meshPipeline, nullptr);
+		vkDestroyPipelineLayout(_device, _opaquePipelineLayout, nullptr);
+		vkDestroyPipeline(_device, _opaquePipeline, nullptr);
 	});
 }
 
@@ -928,8 +883,7 @@ void init_mesh_pipeline() {
 void init_pipelines() {
 	init_background_pipelines();
 
-	init_triangle_pipeline();
-	init_mesh_pipeline();
+	init_opaque_pipeline();
 }
 
 void cleanup() {
@@ -1001,6 +955,20 @@ VkRenderingAttachmentInfo attachment_info( VkImageView view, VkClearValue* clear
 	return colorAttachment;
 }
 
+VkRenderingAttachmentInfo depth_attachment_info(VkImageView view, VkImageLayout layout /*= VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL*/) {
+	VkRenderingAttachmentInfo depthAttachment{};
+	depthAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+	depthAttachment.pNext = nullptr;
+
+	depthAttachment.imageView = view;
+	depthAttachment.imageLayout = layout;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	depthAttachment.clearValue.depthStencil.depth = 0.f;
+
+	return depthAttachment;
+}
+
 VkRenderingInfo rendering_info(VkExtent2D renderExtent, VkRenderingAttachmentInfo* colorAttachment, VkRenderingAttachmentInfo* depthAttachment) {
 	VkRenderingInfo info{};
 	info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -1017,11 +985,10 @@ VkRenderingInfo rendering_info(VkExtent2D renderExtent, VkRenderingAttachmentInf
 void draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view) {
 	//begin a render pass  connected to our draw image
 	VkRenderingAttachmentInfo colorAttachment = attachment_info(_drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	VkRenderingAttachmentInfo depthAttachment = depth_attachment_info(_depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
-	VkRenderingInfo renderInfo = rendering_info(_drawExtent, &colorAttachment, nullptr);
+	VkRenderingInfo renderInfo = rendering_info(_drawExtent, &colorAttachment, &depthAttachment);
 	vkCmdBeginRendering(cmd, &renderInfo);
-
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _trianglePipeline);
 
 	//set dynamic viewport and scissor
 	VkViewport viewport = {};
@@ -1042,21 +1009,19 @@ void draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view
 
 	vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-	vkCmdDraw(cmd, 3, 1, 0, 0);
-
 	///////////////////////////////////////////////////////////////////////////
 
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _meshPipeline);
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _opaquePipeline);
 
 	GPUDrawPushConstants push_constants;
-	push_constants.vertexBuffer = rectangle.vertexBufferAddress;
-	vkCmdBindIndexBuffer(cmd, rectangle.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+	push_constants.vertexBuffer = geometry_buffer.vertexBufferAddress;
+	vkCmdBindIndexBuffer(cmd, geometry_buffer.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
 	for (Model& model : Model_Manager::get_models()) {
 		for (Mesh& mesh : model.meshes) {
 			push_constants.worldMatrix = projection * view * mesh.transform;
 
-			vkCmdPushConstants(cmd, _meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+			vkCmdPushConstants(cmd, _opaquePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
 
 			vkCmdDrawIndexed(cmd, mesh.index_count, 1, mesh.base_index, mesh.base_vertex, 0);
 		}
@@ -1245,38 +1210,31 @@ GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertice
 }
 
 void init_models() {
-	std::array<Vertex, 4> rect_vertices;
-	rect_vertices[0].position = { 0.5,-0.5, 0 };
-	rect_vertices[1].position = { 0.5,0.5, 0 };
-	rect_vertices[2].position = { -0.5,-0.5, 0 };
-	rect_vertices[3].position = { -0.5,0.5, 0 };
-	rect_vertices[0].color = { 0,0, 0,1 };
-	rect_vertices[1].color = { 0.5,0.5,0.5 ,1 };
-	rect_vertices[2].color = { 1,0, 0,1 };
-	rect_vertices[3].color = { 0,1, 0,1 };
-	
-	std::array<uint32_t, 6> rect_indices;
-	rect_indices[0] = 0;
-	rect_indices[1] = 1;
-	rect_indices[2] = 2;
-	rect_indices[3] = 2;
-	rect_indices[4] = 1;
-	rect_indices[5] = 3;
-
-	// get indieces
-	// get vertices
-
-	//rectangle = uploadMesh(rect_indices, rect_vertices);
 	Model_Manager::load_model("submarine/scene.gltf");
-	rectangle = uploadMesh(Model_Manager::get_indices(), Model_Manager::get_vertices());
+	geometry_buffer = uploadMesh(Model_Manager::get_indices(), Model_Manager::get_vertices());
 
-	//delete the rectangle data on engine shutdown
 	_mainDeletionQueue.push_function([&]() {
-		destroy_buffer(rectangle.indexBuffer);
-		destroy_buffer(rectangle.vertexBuffer);
+		destroy_buffer(geometry_buffer.indexBuffer);
+		destroy_buffer(geometry_buffer.vertexBuffer);
 	});
 }
 
+void resize_swapchain(GLFWwindow* window) {
+	printf("RESIZING\n");
+
+	vkDeviceWaitIdle(_device);
+
+	destroy_swapchain();
+
+	int w = 0, h =0;
+	glfwGetFramebufferSize(window, &w, &h);
+
+	width = w;
+	height = h;
+	create_swapchain(width, height);
+
+	resize_requested = false;
+}
 
 int main() {
     printf("hello vk\n");
@@ -1293,7 +1251,7 @@ int main() {
 	if (init_vulkan(window))
 		return 1;
 
-	create_swapchain(width, height);
+	init_swapchain(width, height);
 	init_commands();
 	init_sync_structures();
 	init_descriptors();
@@ -1312,13 +1270,25 @@ int main() {
     while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
 
+		if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) { // minimized
+			int w = 0, h = 0;
+			while (w == 0 || h == 0) {
+				glfwGetFramebufferSize(window, &w, &h);
+				glfwWaitEvents();
+			}
+		}
+
+		if (resize_requested) {
+			resize_swapchain(window);
+		}
+
 		ImGui_ImplVulkan_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
 
 		if (ImGui::Begin("background")) {
 			ComputeEffect& selected = backgroundEffects[currentBackgroundEffect];
-
+			ImGui::SliderFloat("Render Scale", &renderScale, 0.3f, 1.f);
 			ImGui::Text("Selected effect: ", selected.name);
 			ImGui::SliderInt("Effect Index", &currentBackgroundEffect, 0, backgroundEffects.size() - 1);
 			ImGui::InputFloat4("data1", (float*)&selected.data.data1);
@@ -1353,7 +1323,13 @@ int main() {
 
 		//request image from the swapchain
 		uint32_t swapchainImageIndex;
-		VK_CHECK(vkAcquireNextImageKHR(_device, _swapchain, 1000000000, get_current_frame()._swapchainSemaphore, nullptr, &swapchainImageIndex));
+		
+		//VK_CHECK(vkAcquireNextImageKHR(_device, _swapchain, 1000000000, get_current_frame()._swapchainSemaphore, nullptr, &swapchainImageIndex));
+		VkResult e = vkAcquireNextImageKHR(_device, _swapchain, 1000000000, get_current_frame()._swapchainSemaphore, nullptr, &swapchainImageIndex);
+		if (e == VK_ERROR_OUT_OF_DATE_KHR) {
+			resize_requested = true;
+			continue;
+		}
 		
 		VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
 		// now that we are sure that the commands finished executing, we can safely
@@ -1363,8 +1339,8 @@ int main() {
 		//begin the command buffer recording. We will use this command buffer exactly once, so we want to let vulkan know that
 		VkCommandBufferBeginInfo cmdBeginInfo = command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
-		_drawExtent.width = _drawImage.imageExtent.width;
-		_drawExtent.height = _drawImage.imageExtent.height;
+		_drawExtent.height = std::min(_swapchainExtent.height, _drawImage.imageExtent.height) * renderScale;
+		_drawExtent.width = std::min(_swapchainExtent.width, _drawImage.imageExtent.width) * renderScale;
 
 		VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
@@ -1374,6 +1350,7 @@ int main() {
 		draw_background(cmd);
 
 		transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+		transition_image(cmd, _depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
 		glm::vec3 forward;
 		forward.x = cos(glm::radians(pitch)) * sin(glm::radians(yaw));
@@ -1449,7 +1426,11 @@ int main() {
 
 		presentInfo.pImageIndices = &swapchainImageIndex;
 
-		VK_CHECK(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
+		//VK_CHECK(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
+		VkResult presentResult = vkQueuePresentKHR(_graphicsQueue, &presentInfo);
+		if (presentResult == VK_ERROR_OUT_OF_DATE_KHR) {
+			resize_requested = true;
+		}
 
 		ImGuiIO& io = ImGui::GetIO();
 		if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {

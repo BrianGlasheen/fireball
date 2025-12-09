@@ -134,6 +134,9 @@ namespace Model_Manager {
                     ai_mesh->mNormals[i].z
                 );
             }
+            else {
+                vertex.normal = vec3(0.0f, 0.0f, 1.0f);
+            }
 
             if (ai_mesh->mTextureCoords[0]) {
                 vertex.uv_x = ai_mesh->mTextureCoords[0][i].x;
@@ -147,6 +150,9 @@ namespace Model_Manager {
                     ai_mesh->mColors[0][i].b,
                     ai_mesh->mColors[0][i].a
                 );
+            }
+            else {
+                vertex.color = vec4(1.0f);
             }
 
             g_vertices.push_back(vertex);
