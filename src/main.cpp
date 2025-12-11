@@ -1,6 +1,7 @@
+#include "camera.h"
 #include "math.h"
-#include "pipeline.h"
 #include "model_manager.h"
+#include "pipeline.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -39,6 +40,16 @@ static void check_vk_result(VkResult err) {
 	fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
 	if (err < 0)
 		abort();
+}
+
+void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
+	if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_RIGHT) {
+		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+	}
+	else if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT) {
+		//glfwSetCursorPos(window, 0, 0);
+		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	}
 }
 
 bool validation_layers = true;
@@ -1247,6 +1258,9 @@ int main() {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	main_scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor()); // Valid on GLFW 3.3+ only
     GLFWwindow* window = glfwCreateWindow(width * main_scale, height * main_scale, "fireball", nullptr, nullptr);
+	
+	glfwSetMouseButtonCallback(window, mouseCallback);
+	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
 	if (init_vulkan(window))
 		return 1;
@@ -1262,12 +1276,16 @@ int main() {
 	
 	init_imgui(window);
 
-	vec3 position = vec3(0, 0, -5);
-	float pitch = 0.0f;
-	float yaw = 0.0f;
-	float zoom = 90.0f;
+	Camera camera;
+
+	double dt;
+	double last_frame = 0.0;
 
     while (!glfwWindowShouldClose(window)) {
+		double current_time = glfwGetTime();
+		dt = current_time - last_frame;
+		last_frame = current_time;
+
 		glfwPollEvents();
 
 		if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) { // minimized
@@ -1300,18 +1318,23 @@ int main() {
 
 		if (ImGui::Begin("Camera Controls")) {
 			// Position sliders
-			ImGui::SliderFloat("X", &position.x, -500.0f, 500.0f);
-			ImGui::SliderFloat("Y", &position.y, -500.0f, 500.0f);
-			ImGui::SliderFloat("Z", &position.z, -500.0f, 500.0f);
+			ImGui::SliderFloat("X", &camera.position.x, -500.0f, 500.0f);
+			ImGui::SliderFloat("Y", &camera.position.y, -500.0f, 500.0f);
+			ImGui::SliderFloat("Z", &camera.position.z, -500.0f, 500.0f);
 
-			ImGui::SliderFloat("Pitch", &pitch, -89.0f, 89.0f);
-			ImGui::SliderFloat("Yaw", &yaw, -180.0f, 180.0f);
-			ImGui::SliderFloat("Zoom", &zoom, -180.0f, 180.0f);
+			ImGui::SliderFloat("Pitch", &camera.pitch, -89.0f, 89.0f);
+			ImGui::SliderFloat("Yaw", &camera.yaw, -180.0f, 180.0f);
+			ImGui::SliderFloat("Zoom", &camera.zoom, -180.0f, 180.0f);
 
 			ImGui::End();
 		}
 
 		ImGui::Render();
+
+		double xpos, ypos;
+		glfwGetCursorPos(window, &xpos, &ypos);
+		camera.update(xpos, ypos);
+		camera.move(window, dt);
 
 		// wait until the gpu has finished rendering the last frame. Timeout of 1
 		// second
@@ -1352,16 +1375,8 @@ int main() {
 		transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 		transition_image(cmd, _depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
-		glm::vec3 forward;
-		forward.x = cos(glm::radians(pitch)) * sin(glm::radians(yaw));
-		forward.y = sin(glm::radians(pitch));
-		forward.z = cos(glm::radians(pitch)) * cos(glm::radians(yaw));
-		forward = glm::normalize(forward);
-		glm::vec3 target = position + forward;
-		glm::vec3 up = glm::vec3(0, 1, 0);
-		mat4 view = glm::lookAt(position, target, up);
-		mat4 projection = glm::perspective(glm::radians(zoom), (float)_drawExtent.width / (float)_drawExtent.height, 0.1f, 10000.f);
-		projection[1][1] *= -1;
+		mat4 view = camera.get_view();
+		mat4 projection = camera.get_projection((float)width/(float)height);
 		draw_geometry(cmd, projection, view);
 
 		transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
