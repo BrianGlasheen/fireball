@@ -84,6 +84,12 @@ target_include_directories(${PROJECT_NAME}
         "external/imgui/backends"
 )
 
+if(UNIX AND NOT APPLE)
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        X11 Xcursor Xrandr Xi Xinerama Xxf86vm pthread dl
+    )
+endif()
+
 target_link_libraries(${PROJECT_NAME} 
     PRIVATE
         Vulkan::Vulkan
