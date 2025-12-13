@@ -1,6 +1,6 @@
-#pragma once
-
 #include "model_manager.h"
+
+#include "meshoptimizer.h"
 
 namespace Model_Manager {
     static std::string base_path;
@@ -37,7 +37,7 @@ namespace Model_Manager {
         return false;
     }
 
-    Model_Handle load_model(const std::string& path, bool append_base_path) {
+    Model_Handle load_model(const std::string& path, const Mesh_Opt_Flags mesh_opt_flags, bool append_base_path) {
         const std::string full_path = append_base_path ? base_path + path : path;
 
         printf("[Model] Attempting to load %s\n", full_path.c_str());
@@ -65,7 +65,7 @@ namespace Model_Manager {
         uint32_t num_meshes = scene->mNumMeshes;
         model.meshes.reserve(scene->mNumMeshes);
 
-        process_node(scene->mRootNode, scene, model, path_without_filename, mat4(1.0f));
+        process_node(scene->mRootNode, scene, model, path_without_filename, mat4(1.0f), mesh_opt_flags);
 
         uint32_t actual_meshes = (uint32_t)model.meshes.size();
         assert(num_meshes == actual_meshes);
@@ -77,47 +77,55 @@ namespace Model_Manager {
         size_t end_indices = g_indices.size();
         
         // todo can add timer
-        printf("[Model] Loaded %llu vertices\n", end_vertices - begin_vertices);
-        printf("[Model] Loaded %llu indices\n", end_indices - begin_indices);
+        printf("[Model] Loaded %lu vertices\n", end_vertices - begin_vertices);
+        printf("[Model] Loaded %lu indices\n", end_indices - begin_indices);
 
         return handle;
     }
 
-    void process_node(aiNode* node, const aiScene* scene, Model& model, const std::string& path, const mat4& parent_transform) {
+    void process_node(aiNode* node, const aiScene* scene, Model& model, const std::string& path, const mat4& parent_transform, const Mesh_Opt_Flags mesh_opt_flags) {
         mat4 current_transform = parent_transform * assimp_to_glm(node->mTransformation);
 
         for (uint32_t i = 0; i < node->mNumMeshes; i++) {
+            size_t begin_vertices = g_vertices.size();
+            size_t begin_indices = g_vertices.size();
+
             aiMesh* ai_mesh = scene->mMeshes[node->mMeshes[i]];
 
             Mesh mesh = {};
             mesh.name = ai_mesh->mName.C_Str();
             mesh.transform = current_transform;
+            mesh.base_vertex = (uint32_t)g_vertices.size();
+            mesh.base_index = (uint32_t)g_indices.size();
+            mesh.vertex_count = (uint32_t)ai_mesh->mNumVertices;
+            mesh.index_count = (uint32_t)ai_mesh->mNumFaces * 3;
 
-            printf("[Model] Processing mesh %s\n", mesh.name.c_str());
-            size_t begin_vertices = g_vertices.size();
-            size_t begin_indices = g_vertices.size();
+            std::vector<Vertex> vertex_buffer(mesh.vertex_count);
+            std::vector<uint32_t> index_buffer(mesh.index_count);
+            process_mesh(ai_mesh, vertex_buffer, index_buffer);
 
-            process_mesh(ai_mesh, mesh);
+            // for each lod
+            optimize_mesh(vertex_buffer, index_buffer, mesh_opt_flags);
+
+            g_vertices.insert(g_vertices.end(), vertex_buffer.begin(), vertex_buffer.end());
+            g_indices.insert(g_indices.end(), index_buffer.begin(), index_buffer.end());
 
             model.meshes.push_back(mesh);
 
             size_t end_vertices = g_vertices.size();
             size_t end_indices = g_vertices.size();
-
-            printf("[Model] Mesh has %llu vertices\n", end_vertices - begin_vertices);
-            printf("[Model] Mesh has %llu indices\n", end_indices - begin_indices);
+            
+            printf("[Model] Loaded mesh %s\n", mesh.name.c_str());
+            printf("[Model] %lu vertices & %lu indices\n", end_vertices - begin_vertices,  end_indices - begin_indices);
+            // timer
         }
 
         for (uint32_t i = 0; i < node->mNumChildren; i++) {
-            process_node(node->mChildren[i], scene, model, path, current_transform);
+            process_node(node->mChildren[i], scene, model, path, current_transform, mesh_opt_flags);
         }
     }
 
-    void process_mesh(const aiMesh* ai_mesh, Mesh& mesh) {
-        mesh.base_vertex = g_vertices.size();
-        mesh.vertex_count = ai_mesh->mNumVertices;
-
-        g_vertices.reserve(g_vertices.size() + mesh.vertex_count);
+    void process_mesh(const aiMesh* ai_mesh,  std::vector<Vertex>& vertex_buffer, std::vector<uint32_t>& index_buffer) {
         for (uint32_t i = 0; i < ai_mesh->mNumVertices; i++) {
             Vertex vertex = {};
 
@@ -155,22 +163,40 @@ namespace Model_Manager {
                 vertex.color = vec4(1.0f);
             }
 
-            g_vertices.push_back(vertex);
+            vertex_buffer[i]  = vertex;
         }
 
-        // add indices
-        mesh.base_index = g_indices.size();
-
-        uint32_t num_indices = 0;
-        for (uint32_t i = 0; i < ai_mesh->mNumFaces; ++i)
-            num_indices += ai_mesh->mFaces[i].mNumIndices;
-
-        mesh.index_count = num_indices;
-        
-        g_indices.reserve(g_indices.size() + num_indices);
+        uint32_t index = 0;
         for (uint32_t i = 0; i < ai_mesh->mNumFaces; ++i) {
             const aiFace& face = ai_mesh->mFaces[i];
-            g_indices.insert(g_indices.end(), face.mIndices, face.mIndices + face.mNumIndices);
+            memcpy(&index_buffer[index], face.mIndices, 3 * sizeof(uint32_t));
+            index += 3;
+        }
+    }
+
+    void optimize_mesh(std::vector<Vertex>& vertex_buffer, std::vector<uint32_t>& index_buffer, const Mesh_Opt_Flags flags) {
+        if (flags.index) {
+
+        }
+
+        if (flags.vertex_cache) {
+
+        }
+
+        if (flags.overdraw) {
+
+        }
+
+        if (flags.vertex_fetch) {
+
+        }
+
+        if (flags.vertex_quantization) {
+
+        }
+
+        if (flags.shadow_indexing) {
+
         }
     }
 

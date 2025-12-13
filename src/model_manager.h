@@ -25,6 +25,16 @@ struct Vertex {
     // maybe bitangents
 };
 
+struct Mesh_Opt_Flags {
+    uint8_t index : 1;
+    uint8_t vertex_cache : 1;
+    uint8_t overdraw : 1;
+    uint8_t vertex_fetch : 1;
+    uint8_t vertex_quantization : 1;
+    uint8_t shadow_indexing : 1;
+    uint8_t : 2; 
+};
+
 namespace Model_Manager {
     mat4 assimp_to_glm(const aiMatrix4x4& ai_mat);
 
@@ -32,10 +42,11 @@ namespace Model_Manager {
     void cleanup();
 
     bool model_loaded(const std::string& full_path, Model_Handle& model_index);
-    Model_Handle load_model(const std::string& path, bool append_base_path = true);
+    Model_Handle load_model(const std::string& path, const Mesh_Opt_Flags mesh_opt_flags = {}, bool append_base_path = true);
 
-    void process_node(aiNode* node, const aiScene* scene, Model& model, const std::string& path, const mat4& parent_transform);
-    void process_mesh(const aiMesh* ai_mesh, Mesh& mesh);
+    void process_node(aiNode* node, const aiScene* scene, Model& model, const std::string& path, const mat4& parent_transform, const Mesh_Opt_Flags mesh_opt_flags);
+    void process_mesh(const aiMesh* ai_mesh,  std::vector<Vertex>& vertex_buffer, std::vector<uint32_t>& index_buffer);
+    void optimize_mesh(std::vector<Vertex>& vertex_buffer, std::vector<uint32_t>& index_buffer, const Mesh_Opt_Flags flags);
 
     //Material load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path);
 

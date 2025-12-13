@@ -77,6 +77,7 @@ add_subdirectory(external/glm)
 add_subdirectory(external/vk-bootstrap)
 add_subdirectory(external/vma)
 add_subdirectory(external/assimp)
+add_subdirectory(external/meshoptimizer)
 
 target_include_directories(${PROJECT_NAME}
     PRIVATE
@@ -85,12 +86,15 @@ target_include_directories(${PROJECT_NAME}
 )
 
 if(UNIX AND NOT APPLE)
-    target_link_libraries(${PROJECT_NAME} PRIVATE
-        X11 Xcursor Xrandr Xi Xinerama Xxf86vm pthread dl
+    target_link_libraries(
+        ${PROJECT_NAME}
+        PRIVATE
+            X11 Xcursor Xrandr Xi Xinerama Xxf86vm pthread dl
     )
 endif()
 
-target_link_libraries(${PROJECT_NAME} 
+target_link_libraries(
+    ${PROJECT_NAME} 
     PRIVATE
         Vulkan::Vulkan
         glfw
@@ -98,6 +102,7 @@ target_link_libraries(${PROJECT_NAME}
         vk-bootstrap::vk-bootstrap
         GPUOpen::VulkanMemoryAllocator
         assimp
+        meshoptimizer
 )
 
 find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)
