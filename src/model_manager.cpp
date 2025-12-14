@@ -77,8 +77,8 @@ namespace Model_Manager {
         size_t end_indices = g_indices.size();
         
         // todo can add timer
-        printf("[Model] Loaded %lu vertices\n", end_vertices - begin_vertices);
-        printf("[Model] Loaded %lu indices\n", end_indices - begin_indices);
+        printf("[Model] Loaded %zu vertices\n", end_vertices - begin_vertices);
+        printf("[Model] Loaded %zu indices\n", end_indices - begin_indices);
 
         return handle;
     }
@@ -88,35 +88,48 @@ namespace Model_Manager {
 
         for (uint32_t i = 0; i < node->mNumMeshes; i++) {
             size_t begin_vertices = g_vertices.size();
-            size_t begin_indices = g_vertices.size();
+            size_t begin_indices = g_indices.size();
 
             aiMesh* ai_mesh = scene->mMeshes[node->mMeshes[i]];
+
+            uint32_t vertex_count = (uint32_t)ai_mesh->mNumVertices;
+            uint32_t index_count = (uint32_t)ai_mesh->mNumFaces * 3;
+
+            std::vector<Vertex> vertex_buffer(vertex_count);
+            std::vector<uint32_t> index_buffer(index_count);
+            process_mesh(ai_mesh, vertex_buffer, index_buffer);
+
+            optimize_mesh(vertex_buffer, index_buffer, mesh_opt_flags);
 
             Mesh mesh = {};
             mesh.name = ai_mesh->mName.C_Str();
             mesh.transform = current_transform;
             mesh.base_vertex = (uint32_t)g_vertices.size();
-            mesh.base_index = (uint32_t)g_indices.size();
-            mesh.vertex_count = (uint32_t)ai_mesh->mNumVertices;
-            mesh.index_count = (uint32_t)ai_mesh->mNumFaces * 3;
-
-            std::vector<Vertex> vertex_buffer(mesh.vertex_count);
-            std::vector<uint32_t> index_buffer(mesh.index_count);
-            process_mesh(ai_mesh, vertex_buffer, index_buffer);
-
-            // for each lod
-            optimize_mesh(vertex_buffer, index_buffer, mesh_opt_flags);
+            mesh.vertex_count = (uint32_t)vertex_buffer.size();
 
             g_vertices.insert(g_vertices.end(), vertex_buffer.begin(), vertex_buffer.end());
-            g_indices.insert(g_indices.end(), index_buffer.begin(), index_buffer.end());
+
+            for (uint32_t lod = 0; lod < NUM_LODS; lod++) {
+                printf("lod %d\n", lod);
+                std::vector<uint32_t> lod_indices = (lod == 0) ? 
+                    index_buffer : generate_lod(vertex_buffer, index_buffer, LOD_THRESHOLDS[lod]);
+
+                mesh.lods[lod].base_index = (uint32_t)g_indices.size();
+                mesh.lods[lod].index_count = (uint32_t)lod_indices.size();
+
+                g_indices.insert(g_indices.end(), lod_indices.begin(), lod_indices.end());
+            }
 
             model.meshes.push_back(mesh);
 
             size_t end_vertices = g_vertices.size();
-            size_t end_indices = g_vertices.size();
+            size_t end_indices = g_indices.size();
             
             printf("[Model] Loaded mesh %s\n", mesh.name.c_str());
-            printf("[Model] %lu vertices & %lu indices\n", end_vertices - begin_vertices,  end_indices - begin_indices);
+            printf("[Model] %zu vertices\n", end_vertices - begin_vertices);
+            for (uint32_t lod = 0; lod < NUM_LODS; lod++) {
+                printf("[Model] LOD%d: %u indices (%.1f%%)\n", lod, mesh.lods[lod].index_count, LOD_THRESHOLDS[lod] * 100.0f);
+            }
             // timer
         }
 
@@ -176,19 +189,73 @@ namespace Model_Manager {
 
     void optimize_mesh(std::vector<Vertex>& vertex_buffer, std::vector<uint32_t>& index_buffer, const Mesh_Opt_Flags flags) {
         if (flags.index) {
+            std::vector<uint32_t> remap(vertex_buffer.size());
+            size_t unique_vertices = meshopt_generateVertexRemap(
+                remap.data(),
+                index_buffer.data(),
+                index_buffer.size(),
+                vertex_buffer.data(),
+                vertex_buffer.size(),
+                sizeof(Vertex)
+            );
 
+            std::vector<uint32_t> optimized_indices(index_buffer.size());
+            meshopt_remapIndexBuffer(
+                optimized_indices.data(),
+                index_buffer.data(),
+                index_buffer.size(),
+                remap.data()
+            );
+            index_buffer = std::move(optimized_indices);
+
+            std::vector<Vertex> optimized_vertices(unique_vertices);
+            meshopt_remapVertexBuffer(
+                optimized_vertices.data(),
+                vertex_buffer.data(),
+                vertex_buffer.size(),
+                sizeof(Vertex),
+                remap.data()
+            );
+            vertex_buffer = std::move(optimized_vertices);
+
+            printf("[Optimize] Index optimization: %zu -> %zu vertices\n", remap.size(), unique_vertices);
         }
 
         if (flags.vertex_cache) {
-
+            meshopt_optimizeVertexCache(
+                index_buffer.data(),
+                index_buffer.data(),
+                index_buffer.size(),
+                vertex_buffer.size()
+            );
+            printf("[Optimize] Vertex cache optimization applied\n");
         }
 
         if (flags.overdraw) {
-
+            meshopt_optimizeOverdraw(
+                index_buffer.data(),
+                index_buffer.data(),
+                index_buffer.size(),
+                &vertex_buffer[0].position.x,
+                vertex_buffer.size(),
+                sizeof(Vertex),
+                1.05f
+            );
+            printf("[Optimize] Overdraw optimization applied\n");
         }
 
         if (flags.vertex_fetch) {
-
+            std::vector<Vertex> optimized_vertices(vertex_buffer.size());
+            meshopt_optimizeVertexFetch(
+                optimized_vertices.data(),
+                index_buffer.data(),
+                index_buffer.size(),
+                vertex_buffer.data(),
+                vertex_buffer.size(),
+                sizeof(Vertex)
+            );
+            vertex_buffer = std::move(optimized_vertices);
+            printf("[Optimize] Vertex fetch optimization applied\n");
         }
 
         if (flags.vertex_quantization) {
@@ -200,11 +267,29 @@ namespace Model_Manager {
         }
     }
 
-    //Material load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path);
+    std::vector<uint32_t> generate_lod(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, float threshold) {
+        size_t target_index_count = size_t(indices.size() * threshold);
 
-    //void setup_buffers();
-    
-    //void setup_ssbos();
+        std::vector<uint32_t> lod_indices(indices.size());
+
+        size_t final_count = meshopt_simplify(
+            lod_indices.data(),
+            indices.data(),
+            indices.size(),
+            &vertices[0].position.x,
+            vertices.size(),
+            sizeof(Vertex),
+            target_index_count,
+            0.02f,
+            0,
+            nullptr
+        );
+
+        lod_indices.resize(final_count);
+        return lod_indices;
+    }
+
+    //Material load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path);
 
     std::vector<Vertex>& get_vertices() {
         return g_vertices;

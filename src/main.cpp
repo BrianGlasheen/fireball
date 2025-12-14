@@ -43,12 +43,26 @@ static void check_vk_result(VkResult err) {
 }
 
 void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
+	ImGuiIO& io = ImGui::GetIO();
+	if (io.WantCaptureMouse) {
+		return;
+	}
+
 	if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_RIGHT) {
 		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 	}
 	else if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT) {
 		//glfwSetCursorPos(window, 0, 0);
 		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+	}
+}
+
+int lod = 0;
+
+void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+	if (action == GLFW_PRESS) {
+		if (key == GLFW_KEY_ESCAPE)
+			glfwSetWindowShouldClose(window, true);
 	}
 }
 
@@ -870,6 +884,7 @@ void init_opaque_pipeline() {
 	pipelineBuilder.set_shaders(vertex, fragment);
 	pipelineBuilder.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 	pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
+	//pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_LINE);
 	pipelineBuilder.set_cull_mode(VK_CULL_MODE_NONE, VK_FRONT_FACE_CLOCKWISE);
 	pipelineBuilder.set_multisampling_none();
 	pipelineBuilder.disable_blending();
@@ -1034,7 +1049,7 @@ void draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view
 
 			vkCmdPushConstants(cmd, _opaquePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
 
-			vkCmdDrawIndexed(cmd, mesh.index_count, 1, mesh.base_index, mesh.base_vertex, 0);
+			vkCmdDrawIndexed(cmd, mesh.lods[lod].index_count, 1, mesh.lods[lod].base_index, mesh.base_vertex, 0);
 		}
 	}
 	
@@ -1221,7 +1236,7 @@ GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertice
 }
 
 void init_models() {
-	Model_Manager::load_model("submarine/scene.gltf");
+	Model_Manager::load_model("submarine/scene.gltf", Mesh_Opt_Flags_All);
 	geometry_buffer = uploadMesh(Model_Manager::get_indices(), Model_Manager::get_vertices());
 
 	_mainDeletionQueue.push_function([&]() {
@@ -1260,6 +1275,7 @@ int main() {
     GLFWwindow* window = glfwCreateWindow(width * main_scale, height * main_scale, "fireball", nullptr, nullptr);
 	
 	glfwSetMouseButtonCallback(window, mouseCallback);
+	glfwSetKeyCallback(window, keyCallback);
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
 	if (init_vulkan(window))
@@ -1318,13 +1334,15 @@ int main() {
 
 		if (ImGui::Begin("Camera Controls")) {
 			// Position sliders
-			ImGui::SliderFloat("X", &camera.position.x, -500.0f, 500.0f);
-			ImGui::SliderFloat("Y", &camera.position.y, -500.0f, 500.0f);
-			ImGui::SliderFloat("Z", &camera.position.z, -500.0f, 500.0f);
+			ImGui::SliderFloat("X", &camera.position.x, -5000.0f, 5000.0f);
+			ImGui::SliderFloat("Y", &camera.position.y, -5000.0f, 5000.0f);
+			ImGui::SliderFloat("Z", &camera.position.z, -5000.0f, 5000.0f);
 
 			ImGui::SliderFloat("Pitch", &camera.pitch, -89.0f, 89.0f);
 			ImGui::SliderFloat("Yaw", &camera.yaw, -180.0f, 180.0f);
 			ImGui::SliderFloat("Zoom", &camera.zoom, -180.0f, 180.0f);
+
+			ImGui::SliderInt("LOD", &lod, 0, NUM_LODS - 1);
 
 			ImGui::End();
 		}

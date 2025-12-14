@@ -35,6 +35,15 @@ struct Mesh_Opt_Flags {
     uint8_t : 2; 
 };
 
+constexpr Mesh_Opt_Flags Mesh_Opt_Flags_All = {
+    .index = 1,
+    .vertex_cache = 1,
+    .overdraw = 1,
+    .vertex_fetch = 1,
+    .vertex_quantization = 1,
+    .shadow_indexing = 1
+};
+
 namespace Model_Manager {
     mat4 assimp_to_glm(const aiMatrix4x4& ai_mat);
 
@@ -47,6 +56,7 @@ namespace Model_Manager {
     void process_node(aiNode* node, const aiScene* scene, Model& model, const std::string& path, const mat4& parent_transform, const Mesh_Opt_Flags mesh_opt_flags);
     void process_mesh(const aiMesh* ai_mesh,  std::vector<Vertex>& vertex_buffer, std::vector<uint32_t>& index_buffer);
     void optimize_mesh(std::vector<Vertex>& vertex_buffer, std::vector<uint32_t>& index_buffer, const Mesh_Opt_Flags flags);
+    std::vector<uint32_t> generate_lod(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, float threshold);
 
     //Material load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path);
 
