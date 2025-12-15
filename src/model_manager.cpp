@@ -1,6 +1,7 @@
 #include "model_manager.h"
 
-#include "meshoptimizer.h"
+#include <meshoptimizer.h>
+#include <stb_image.h>
 
 namespace Model_Manager {
     static std::string base_path;
@@ -77,8 +78,7 @@ namespace Model_Manager {
         size_t end_indices = g_indices.size();
         
         // todo can add timer
-        printf("[Model] Loaded %zu vertices\n", end_vertices - begin_vertices);
-        printf("[Model] Loaded %zu indices\n", end_indices - begin_indices);
+        printf("[Model] Loaded %s: %zu meshes %zu vertices\n", path.c_str(), model.meshes.size(), end_vertices - begin_vertices);
 
         return handle;
     }
@@ -289,7 +289,9 @@ namespace Model_Manager {
         return lod_indices;
     }
 
-    //Material load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path);
+    void load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path) {
+    
+    }
 
     std::vector<Vertex>& get_vertices() {
         return g_vertices;

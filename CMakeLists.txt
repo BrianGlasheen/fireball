@@ -54,6 +54,12 @@ target_compile_definitions(
     GLM_FORCE_QUAT_CTOR_XYZW
 )
 
+target_include_directories(
+    ${PROJECT_NAME}
+    PRIVATE
+    "external/stb"
+)
+
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)

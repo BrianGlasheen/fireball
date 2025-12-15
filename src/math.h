@@ -10,6 +10,7 @@
 #include <glm/ext/quaternion_float.hpp>
 #include <glm/ext/quaternion_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/packing.hpp>
 
 #define PI 3.14159265358979323846f
 
