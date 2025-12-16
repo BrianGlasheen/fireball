@@ -80,8 +80,6 @@ std::vector<VkImage> _swapchainImages;
 std::vector<VkImageView> _swapchainImageViews;
 VkExtent2D _swapchainExtent;
 
-std::vector<uint32_t> bindless_texs;
-int active_bindless = 0;
 int lod = 0;
 
 DeletionQueue _mainDeletionQueue;
@@ -99,12 +97,6 @@ FrameData& get_current_frame() { return _frames[_frameNumber % FRAME_OVERLAP]; }
 AllocatedImage _drawImage;
 AllocatedImage _depthImage;
 VkExtent2D _drawExtent;
-
-#define MAX_BINDLESS_TEXTURES 65535
-VkDescriptorSetLayout _bindlessDescriptorLayout;
-VkDescriptorSet _bindlessDescriptorSet;
-std::vector<AllocatedImage> _bindlessTextures;
-uint32_t _nextBindlessTextureIndex = 0;
 
 struct ComputePushConstants {
 	vec4 data1;
@@ -139,9 +131,6 @@ AllocatedImage _whiteImage;
 AllocatedImage _blackImage;
 AllocatedImage _greyImage;
 AllocatedImage _errorCheckerboardImage;
-
-VkSampler _defaultSamplerLinear;
-VkSampler _defaultSamplerNearest;
 
 int init_vulkan(GLFWwindow *window) {
     vkb::InstanceBuilder builder;
@@ -480,7 +469,7 @@ void init_bindless_descriptors() {
 	VkDescriptorSetLayoutBinding bindlessBinding{};
 	bindlessBinding.binding = 0;
 	bindlessBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	bindlessBinding.descriptorCount = MAX_BINDLESS_TEXTURES;
+	bindlessBinding.descriptorCount = Texture_Manager::max_bindless();
 	bindlessBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
 	VkDescriptorSetLayoutCreateInfo layoutInfo{};
@@ -501,12 +490,14 @@ void init_bindless_descriptors() {
 	layoutInfo.pNext = &bindingFlagsInfo;
 	layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
 
-	VK_CHECK(vkCreateDescriptorSetLayout(_device, &layoutInfo, nullptr, &_bindlessDescriptorLayout));
+	VkDescriptorSetLayout layout;
+	VK_CHECK(vkCreateDescriptorSetLayout(_device, &layoutInfo, nullptr, &layout));
+	Texture_Manager::set_bindless_descriptor_layout(layout);
 
 	// Create a descriptor pool for bindless textures
 	VkDescriptorPoolSize poolSize{};
 	poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	poolSize.descriptorCount = MAX_BINDLESS_TEXTURES;
+	poolSize.descriptorCount = Texture_Manager::max_bindless();
 
 	VkDescriptorPoolCreateInfo poolInfo{};
 	poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -523,42 +514,16 @@ void init_bindless_descriptors() {
 	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 	allocInfo.descriptorPool = bindlessPool;
 	allocInfo.descriptorSetCount = 1;
-	allocInfo.pSetLayouts = &_bindlessDescriptorLayout;
+	allocInfo.pSetLayouts = &layout;
 
-	VK_CHECK(vkAllocateDescriptorSets(_device, &allocInfo, &_bindlessDescriptorSet));
+	VkDescriptorSet descriptorSet;
+	VK_CHECK(vkAllocateDescriptorSets(_device, &allocInfo, &descriptorSet));
+	Texture_Manager::set_bindless_descriptor_set(descriptorSet);
 
 	_mainDeletionQueue.push_function([=]() {
-		vkDestroyDescriptorSetLayout(_device, _bindlessDescriptorLayout, nullptr);
+		vkDestroyDescriptorSetLayout(_device, layout, nullptr);
 		vkDestroyDescriptorPool(_device, bindlessPool, nullptr);
 	});
-}
-
-uint32_t add_bindless_texture(const AllocatedImage& image) {
-	if (_nextBindlessTextureIndex > MAX_BINDLESS_TEXTURES) {
-		fprintf(stderr, "Bindless texture limit reached!\n");
-		return 0;
-	}
-
-	uint32_t textureIndex = _nextBindlessTextureIndex++;
-
-	// Update the descriptor set
-	VkDescriptorImageInfo imageInfo{};
-	imageInfo.sampler = _defaultSamplerLinear;
-	imageInfo.imageView = image.imageView;
-	imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-	VkWriteDescriptorSet write{};
-	write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-	write.dstSet = _bindlessDescriptorSet;
-	write.dstBinding = 0;
-	write.dstArrayElement = textureIndex;
-	write.descriptorCount = 1;
-	write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-	write.pImageInfo = &imageInfo;
-
-	vkUpdateDescriptorSets(_device, 1, &write, 0, nullptr);
-
-	return textureIndex;
 }
 
 bool load_shader_module(const char* filePath, VkDevice device, VkShaderModule* outShaderModule) {
@@ -700,7 +665,7 @@ void init_opaque_pipeline() {
 	bufferRange.size = sizeof(GPUDrawPushConstants);
 	bufferRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
-	VkDescriptorSetLayout layouts[] = {  _bindlessDescriptorLayout };
+	VkDescriptorSetLayout layouts[] = { Texture_Manager::get_bindless_descriptor_layout() };
 
 	VkPipelineLayoutCreateInfo pipeline_layout_info = pipeline_layout_create_info();
 	pipeline_layout_info.pPushConstantRanges = &bufferRange;
@@ -758,6 +723,7 @@ void cleanup() {
 		_frames[i]._deletionQueue.flush();
 	}
 
+	Texture_Manager::cleanup();
 	_mainDeletionQueue.flush();
 
 	for (int i = 0; i < _swapchainImageCount; i++)
@@ -830,25 +796,26 @@ void draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view
 	VkDescriptorSet imageSet = get_current_frame()._frameDescriptors.allocate(_device, _singleImageDescriptorLayout);
 	{
 		DescriptorWriter writer;
-		writer.write_image(0, _errorCheckerboardImage.imageView, _defaultSamplerNearest, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+		//writer.write_image(0, _errorCheckerboardImage.imageView, _defaultSamplerNearest, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 
-		writer.update_set(_device, imageSet);
+		//writer.update_set(_device, imageSet);
 	}
 
 	//vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _opaquePipelineLayout, 0, 1, &imageSet, 0, nullptr);
-
+	VkDescriptorSet _bindlessDescriptorSet = Texture_Manager::get_bindless_descriptor_set();
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _opaquePipelineLayout,
 		0, 1, &_bindlessDescriptorSet, 0, nullptr);
 
 	GPUDrawPushConstants push_constants;
 	push_constants.vertexBuffer = geometry_buffer.vertexBufferAddress;
-	push_constants.bindless_texture = bindless_texs[active_bindless];
+	//push_constants.bindless_texture = Texture_Manager::get_by_name("error").bindless_id;
 
 	vkCmdBindIndexBuffer(cmd, geometry_buffer.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
 	for (Model& model : Model_Manager::get_models()) {
 		for (Mesh& mesh : model.meshes) {
 			push_constants.worldMatrix = projection * view * mesh.transform;
+			push_constants.bindless_texture = mesh.material.albedo;
 
 			vkCmdPushConstants(cmd, _opaquePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
 
@@ -995,8 +962,8 @@ GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertice
 }
 
 void init_models() {
-	Model_Manager::load_model("submarine/scene.gltf", Mesh_Opt_Flags_All);
-	//Model_Manager::load_model("bistro/Scene.gltf", Mesh_Opt_Flags_All);
+	//Model_Manager::load_model("submarine/scene.gltf", Mesh_Opt_Flags_All);
+	Model_Manager::load_model("bistro/Scene.gltf", Mesh_Opt_Flags_All);
 	geometry_buffer = uploadMesh(Model_Manager::get_indices(), Model_Manager::get_vertices());
 
 	_mainDeletionQueue.push_function([&]() {
@@ -1020,57 +987,6 @@ void resize_swapchain(GLFWwindow* window) {
 	create_swapchain(width, height);
 
 	resize_requested = false;
-}
-
-void init_default_images() {
-	uint32_t white = glm::packUnorm4x8(vec4(1, 1, 1, 1));
-	_whiteImage = renderer.create_image((void*)&white, VkExtent3D{ 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM,
-		VK_IMAGE_USAGE_SAMPLED_BIT);
-
-	uint32_t grey = glm::packUnorm4x8(vec4(0.66f, 0.66f, 0.66f, 1));
-	_greyImage = renderer.create_image((void*)&grey, VkExtent3D{ 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM,
-		VK_IMAGE_USAGE_SAMPLED_BIT);
-
-	uint32_t black = glm::packUnorm4x8(vec4(0, 0, 0, 0));
-	_blackImage = renderer.create_image((void*)&black, VkExtent3D{ 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM,
-		VK_IMAGE_USAGE_SAMPLED_BIT);
-
-	//checkerboard image
-	uint32_t magenta = glm::packUnorm4x8(vec4(1, 0, 1, 1));
-	std::array<uint32_t, 16 * 16 > pixels; //for 16x16 checkerboard texture
-	for (int x = 0; x < 16; x++) {
-		for (int y = 0; y < 16; y++) {
-			pixels[y * 16 + x] = ((x % 2) ^ (y % 2)) ? magenta : black;
-		}
-	}
-	_errorCheckerboardImage = renderer.create_image(pixels.data(), VkExtent3D{ 16, 16, 1 }, VK_FORMAT_R8G8B8A8_UNORM,
-		VK_IMAGE_USAGE_SAMPLED_BIT);
-
-	VkSamplerCreateInfo sampl = { .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
-
-	sampl.magFilter = VK_FILTER_NEAREST;
-	sampl.minFilter = VK_FILTER_NEAREST;
-
-	vkCreateSampler(_device, &sampl, nullptr, &_defaultSamplerNearest);
-
-	sampl.magFilter = VK_FILTER_LINEAR;
-	sampl.minFilter = VK_FILTER_LINEAR;
-	vkCreateSampler(_device, &sampl, nullptr, &_defaultSamplerLinear);
-
-	bindless_texs.push_back(add_bindless_texture(_errorCheckerboardImage));
-	bindless_texs.push_back(add_bindless_texture(_whiteImage));
-	bindless_texs.push_back(add_bindless_texture(_greyImage));
-	bindless_texs.push_back(add_bindless_texture(_blackImage));
-
-	_mainDeletionQueue.push_function([&]() {
-		vkDestroySampler(_device, _defaultSamplerNearest, nullptr);
-		vkDestroySampler(_device, _defaultSamplerLinear, nullptr);
-
-		renderer.destroy_image(_whiteImage);
-		renderer.destroy_image(_greyImage);
-		renderer.destroy_image(_blackImage);
-		renderer.destroy_image(_errorCheckerboardImage);
-	});
 }
 
 int main() {
@@ -1104,9 +1020,7 @@ int main() {
 	init_bindless_descriptors();
 	init_pipelines();
 
-	Texture_Manager::init();
-
-	init_default_images();
+	Texture_Manager::init(&renderer);
 
 	Model_Manager::init("../resources/models/");
 	init_models();
@@ -1173,7 +1087,6 @@ int main() {
 			ImGui::SliderFloat("Zoom", &camera.zoom, -180.0f, 180.0f);
 
 			ImGui::SliderInt("LOD", &lod, 0, NUM_LODS - 1);
-			ImGui::SliderInt("texture", &active_bindless, 0, bindless_texs.size() - 1);
 
 			ImGui::End();
 		}

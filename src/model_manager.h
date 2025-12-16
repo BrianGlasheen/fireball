@@ -58,7 +58,7 @@ namespace Model_Manager {
     void optimize_mesh(std::vector<Vertex>& vertex_buffer, std::vector<uint32_t>& index_buffer, const Mesh_Opt_Flags flags);
     std::vector<uint32_t> generate_lod(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, float threshold);
 
-    //Material load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path);
+    Material load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path);
 
     //void setup_buffers();
     //void setup_ssbos();

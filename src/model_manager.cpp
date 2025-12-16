@@ -1,5 +1,7 @@
 #include "model_manager.h"
 
+#include "texture_manager.h"
+
 #include <meshoptimizer.h>
 #include <stb_image.h>
 
@@ -106,6 +108,7 @@ namespace Model_Manager {
             mesh.transform = current_transform;
             mesh.base_vertex = (uint32_t)g_vertices.size();
             mesh.vertex_count = (uint32_t)vertex_buffer.size();
+            mesh.material = load_material(ai_mesh, scene, path);
 
             g_vertices.insert(g_vertices.end(), vertex_buffer.begin(), vertex_buffer.end());
 
@@ -289,8 +292,24 @@ namespace Model_Manager {
         return lod_indices;
     }
 
-    void load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path) {
-    
+    Material load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path) {
+        Material mesh_material = {};
+
+        if (mesh->mMaterialIndex >= 0) {
+            aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
+
+            if (material->GetTextureCount(aiTextureType_BASE_COLOR)) {
+                aiString str;
+                material->GetTexture(aiTextureType_BASE_COLOR, 0, &str);
+
+                mesh_material.albedo = Texture_Manager::load(path + str.C_Str());
+            }
+            else {
+                mesh_material.albedo = Texture_Manager::get_by_name("error").bindless_id;
+            }
+        }
+
+        return mesh_material;
     }
 
     std::vector<Vertex>& get_vertices() {
