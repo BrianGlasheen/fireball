@@ -118,6 +118,8 @@ struct GPUDrawPushConstants {
 	mat4 worldMatrix;
 	VkDeviceAddress vertexBuffer;
 	uint32_t bindless_texture;
+	float alpha_cutoff;
+	uint32_t blending;
 };
 
 std::vector<ComputeEffect> backgroundEffects;
@@ -642,12 +644,13 @@ void init_background_pipelines() {
 	});
 }
 
-VkPipelineLayout _opaquePipelineLayout;
-VkPipeline _opaquePipeline;
+VkPipelineLayout draw_pipeline_layout;
+VkPipeline opaque_pipeline;
+VkPipeline transparent_pipeline;
 
 GPUMeshBuffers geometry_buffer;
 
-void init_opaque_pipeline() {
+void init_draw_pipeline() {
 	VkShaderModule vertex;
 	if (!load_shader_module("spirv/tri_mesh.vert.spv", _device, &vertex)) {
 		fprintf(stderr, "Error when building the triangle vertex shader module");
@@ -672,12 +675,12 @@ void init_opaque_pipeline() {
 	pipeline_layout_info.pushConstantRangeCount = 1;
 	pipeline_layout_info.pSetLayouts = layouts;
 	pipeline_layout_info.setLayoutCount = 1;
-	VK_CHECK(vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr, &_opaquePipelineLayout));
+	VK_CHECK(vkCreatePipelineLayout(_device, &pipeline_layout_info, nullptr, &draw_pipeline_layout));
 
 	Pipeline_Builder pipelineBuilder;
 
 	//use the triangle layout we created
-	pipelineBuilder._pipelineLayout = _opaquePipelineLayout;
+	pipelineBuilder._pipelineLayout = draw_pipeline_layout;
 	pipelineBuilder.set_shaders(vertex, fragment);
 	pipelineBuilder.set_input_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
 	pipelineBuilder.set_polygon_mode(VK_POLYGON_MODE_FILL);
@@ -688,16 +691,20 @@ void init_opaque_pipeline() {
 	pipelineBuilder.enable_depthtest(true, VK_COMPARE_OP_GREATER_OR_EQUAL);
 	pipelineBuilder.set_color_attachment_format(_drawImage.imageFormat);
 	pipelineBuilder.set_depth_format(_depthImage.imageFormat);
+	opaque_pipeline = pipelineBuilder.build_pipeline(_device);
 
-	_opaquePipeline = pipelineBuilder.build_pipeline(_device);
+	pipelineBuilder.enable_blending_alphablend();
+	pipelineBuilder.enable_depthtest(false, VK_COMPARE_OP_GREATER_OR_EQUAL);
+	transparent_pipeline = pipelineBuilder.build_pipeline(_device);
 
 	//clean structures
 	vkDestroyShaderModule(_device, fragment, nullptr);
 	vkDestroyShaderModule(_device, vertex, nullptr);
 
 	_mainDeletionQueue.push_function([&]() {
-		vkDestroyPipelineLayout(_device, _opaquePipelineLayout, nullptr);
-		vkDestroyPipeline(_device, _opaquePipeline, nullptr);
+		vkDestroyPipelineLayout(_device, draw_pipeline_layout, nullptr);
+		vkDestroyPipeline(_device, opaque_pipeline, nullptr);
+		vkDestroyPipeline(_device, transparent_pipeline, nullptr);
 	});
 }
 
@@ -705,7 +712,7 @@ void init_opaque_pipeline() {
 void init_pipelines() {
 	init_background_pipelines();
 
-	init_opaque_pipeline();
+	init_draw_pipeline();
 }
 
 void cleanup() {
@@ -791,7 +798,7 @@ void draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view
 
 	///////////////////////////////////////////////////////////////////////////
 
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _opaquePipeline);
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, opaque_pipeline);
 
 	VkDescriptorSet imageSet = get_current_frame()._frameDescriptors.allocate(_device, _singleImageDescriptorLayout);
 	{
@@ -803,7 +810,7 @@ void draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view
 
 	//vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _opaquePipelineLayout, 0, 1, &imageSet, 0, nullptr);
 	VkDescriptorSet _bindlessDescriptorSet = Texture_Manager::get_bindless_descriptor_set();
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _opaquePipelineLayout,
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw_pipeline_layout,
 		0, 1, &_bindlessDescriptorSet, 0, nullptr);
 
 	GPUDrawPushConstants push_constants;
@@ -812,16 +819,34 @@ void draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view
 
 	vkCmdBindIndexBuffer(cmd, geometry_buffer.indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
+	push_constants.blending = 0;
 	for (Model& model : Model_Manager::get_models()) {
 		for (Mesh& mesh : model.meshes) {
-			push_constants.worldMatrix = projection * view * mesh.transform;
-			push_constants.bindless_texture = mesh.material.albedo;
-
-			vkCmdPushConstants(cmd, _opaquePipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
-
-			vkCmdDrawIndexed(cmd, mesh.lods[lod].index_count, 1, mesh.lods[lod].base_index, mesh.base_vertex, 0);
+			if (!mesh.material.blend) {
+				push_constants.worldMatrix = projection * view * mesh.transform;
+				push_constants.bindless_texture = mesh.material.albedo;
+				push_constants.alpha_cutoff = mesh.material.alpha_cutoff;
+				vkCmdPushConstants(cmd, draw_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+				vkCmdDrawIndexed(cmd, mesh.lods[lod].index_count, 1, mesh.lods[lod].base_index, mesh.base_vertex, 0);
+			}
 		}
 	}
+
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, transparent_pipeline);
+	push_constants.blending = 1;
+
+	for (Model& model : Model_Manager::get_models()) {
+		for (Mesh& mesh : model.meshes) {
+			if (mesh.material.blend) {
+				push_constants.worldMatrix = projection * view * mesh.transform;
+				push_constants.bindless_texture = mesh.material.albedo;
+				push_constants.alpha_cutoff = mesh.material.alpha_cutoff;
+				vkCmdPushConstants(cmd, draw_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPUDrawPushConstants), &push_constants);
+				vkCmdDrawIndexed(cmd, mesh.lods[lod].index_count, 1, mesh.lods[lod].base_index, mesh.base_vertex, 0);
+			}
+		}
+	}
+
 	
 	vkCmdEndRendering(cmd);
 }
@@ -963,7 +988,10 @@ GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertice
 
 void init_models() {
 	//Model_Manager::load_model("submarine/scene.gltf", Mesh_Opt_Flags_All);
-	Model_Manager::load_model("bistro/Scene.gltf", Mesh_Opt_Flags_All);
+	//Model_Manager::load_model("bistro/Scene.gltf", Mesh_Opt_Flags_All);
+	//Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
+	Model_Manager::load_model("house/scene.gltf");
+	
 	geometry_buffer = uploadMesh(Model_Manager::get_indices(), Model_Manager::get_vertices());
 
 	_mainDeletionQueue.push_function([&]() {
@@ -979,7 +1007,7 @@ void resize_swapchain(GLFWwindow* window) {
 
 	destroy_swapchain();
 
-	int w = 0, h =0;
+	int w = 0, h = 0;
 	glfwGetFramebufferSize(window, &w, &h);
 
 	width = w;

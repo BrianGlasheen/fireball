@@ -10,15 +10,15 @@ constexpr float LOD_THRESHOLDS[NUM_LODS] = { 1.0f, 0.5f, 0.25f, 0.125f, 0.07f, 0
 struct Material {
 	//vec4 base_color;
 	uint32_t albedo;
-	uint32_t normal;
+	//uint32_t normal;
 	//uint32_t met_rough;
 	//uint32_t emissive;
 	//uint32_t amb_occ;
 	//vec4 emissive_factor;
 	//float metallic_factor;
 	//float roughness_factor;
-	//float alpha_cutoff;
-	//Blend_Mode blend_mode;
+	float alpha_cutoff;
+	bool blend;
 };
 
 struct Lod {

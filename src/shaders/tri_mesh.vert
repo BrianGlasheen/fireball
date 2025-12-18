@@ -4,6 +4,9 @@
 layout (location = 0) out vec3 outColor;
 layout (location = 1) out vec2 outUV;
 layout (location = 2) flat out uint outTextureID;
+layout (location = 3) flat out float outAlphaCutoff;
+layout (location = 4) flat out uint inBlendMode;
+
 
 struct Vertex {
 	vec3 position;
@@ -21,6 +24,8 @@ layout(push_constant) uniform constants {
 	mat4 render_matrix;
 	VertexBuffer vertexBuffer;
 	uint textureID;
+	float alpha_cutoff;
+	uint blending;
 } PushConstants;
 
 void main() {
@@ -32,4 +37,6 @@ void main() {
 	outUV.y = v.uv_y;
 
 	outTextureID = PushConstants.textureID;
+	outAlphaCutoff = PushConstants.alpha_cutoff;
+	inBlendMode = PushConstants.blending;
 }

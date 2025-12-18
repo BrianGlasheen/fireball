@@ -2,6 +2,7 @@
 
 #include "texture_manager.h"
 
+#include <assimp/GltfMaterial.h>
 #include <meshoptimizer.h>
 #include <stb_image.h>
 
@@ -295,19 +296,40 @@ namespace Model_Manager {
     Material load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path) {
         Material mesh_material = {};
 
-        if (mesh->mMaterialIndex >= 0) {
-            aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
+        aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
 
+        if (mesh->mMaterialIndex >= 0) {
             if (material->GetTextureCount(aiTextureType_BASE_COLOR)) {
                 aiString str;
                 material->GetTexture(aiTextureType_BASE_COLOR, 0, &str);
-
                 mesh_material.albedo = Texture_Manager::load(path + str.C_Str());
             }
             else {
                 mesh_material.albedo = Texture_Manager::get_by_name("error").bindless_id;
             }
         }
+        
+        // get normal map else default normal
+
+        float alpha_cutoff = 0.5f;
+        mesh_material.blend = false;
+
+        aiString alpha_mode;
+        if (AI_SUCCESS == material->Get(AI_MATKEY_GLTF_ALPHAMODE, alpha_mode)) {
+            if (strcmp(alpha_mode.C_Str(), "BLEND") == 0) {
+                mesh_material.blend = true;
+                alpha_cutoff = 0.0f;
+            }
+            else if (strcmp(alpha_mode.C_Str(), "MASK") == 0) {
+                material->Get(AI_MATKEY_GLTF_ALPHACUTOFF, alpha_cutoff);
+            }
+            else if (strcmp(alpha_mode.C_Str(), "OPAQUE") == 0) {
+                material->Get(AI_MATKEY_GLTF_ALPHACUTOFF, alpha_cutoff);
+                alpha_cutoff = 0.0f;
+            }
+        }
+
+        mesh_material.alpha_cutoff = alpha_cutoff;
 
         return mesh_material;
     }
