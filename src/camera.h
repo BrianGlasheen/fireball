@@ -5,7 +5,7 @@
 
 #define NEAR_PLANE 0.1f
 
-#include "math.h"
+#include "util/math.h"
 
 const float YAW = -90.0f;
 const float PITCH = 0.0f;

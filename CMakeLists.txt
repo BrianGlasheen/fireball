@@ -58,6 +58,7 @@ target_include_directories(
     ${PROJECT_NAME}
     PRIVATE
     "external/stb"
+    "src"
 )
 
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)

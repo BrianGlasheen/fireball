@@ -2,7 +2,7 @@
 
 #include "renderer/vk_types.h"
 #include "renderer/vk_util.h"
-#include "math.h"
+#include "util/math.h"
 
 #include <stb_image.h>
 #include <vulkan/vk_enum_string_helper.h>
@@ -182,7 +182,7 @@ namespace Texture_Manager {
 
 	AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped) {
 		size_t data_size = size.depth * size.width * size.height * 4;
-		AllocatedBuffer uploadbuffer = renderer->create_buffer(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		Allocated_Buffer uploadbuffer = renderer->create_buffer(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
 		memcpy(uploadbuffer.info.pMappedData, data, data_size);
 

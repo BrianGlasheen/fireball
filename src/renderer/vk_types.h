@@ -1,5 +1,7 @@
 #pragma once
 
+#include "util/math.h"
+
 #include <vk_mem_alloc.h>
 #include <vulkan/vk_enum_string_helper.h>
 
@@ -17,16 +19,32 @@
         }																		  \
     } while (0)
 
-struct AllocatedBuffer {
-    VkBuffer buffer;
-    VmaAllocation allocation;
-    VmaAllocationInfo info;
+using Vk_Device_Address = VkDeviceAddress;
+using Vk_Buffer = VkBuffer;
+using Vma_Allocation = VmaAllocation;
+using Vma_Allocation_Info = VmaAllocationInfo;
+
+struct Allocated_Buffer {
+    Vk_Buffer buffer;
+	Vma_Allocation allocation;
+	Vma_Allocation_Info info;
 };
 
-struct GPUMeshBuffers {
-    AllocatedBuffer indexBuffer;
-    AllocatedBuffer vertexBuffer;
-    VkDeviceAddress vertexBufferAddress;
+struct GPU_Mesh_Buffers {
+	Allocated_Buffer vertex_buffer;
+	Allocated_Buffer index_buffer;
+
+	Allocated_Buffer transform_buffer;
+	Allocated_Buffer material_buffer;
+};
+
+struct GPU_Push_Constants {
+	Vk_Device_Address vertex_buffer;
+	Vk_Device_Address transform_buffer;
+	Vk_Device_Address material_buffer;
+	int padding[2];
+	mat4 projection;
+	mat4 view;
 };
 
 struct DeletionQueue {

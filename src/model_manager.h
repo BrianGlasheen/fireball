@@ -1,6 +1,6 @@
 #pragma once
 
-#include "math.h"
+#include "util/math.h"
 #include "model.h"
 
 #include <assimp/Importer.hpp>

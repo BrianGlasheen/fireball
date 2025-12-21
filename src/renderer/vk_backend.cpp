@@ -7,7 +7,7 @@ void Vk_Backend::init(VkDevice device, VmaAllocator allocator) {
 	_allocator = allocator;
 }
 
-AllocatedBuffer Vk_Backend::create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) {
+Allocated_Buffer Vk_Backend::create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) {
 	// allocate buffer
 	VkBufferCreateInfo bufferInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 	bufferInfo.pNext = nullptr;
@@ -18,7 +18,7 @@ AllocatedBuffer Vk_Backend::create_buffer(size_t allocSize, VkBufferUsageFlags u
 	VmaAllocationCreateInfo vmaallocInfo = {};
 	vmaallocInfo.usage = memoryUsage;
 	vmaallocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
-	AllocatedBuffer newBuffer;
+	Allocated_Buffer newBuffer;
 
 	// allocate the buffer
 	VK_CHECK(vmaCreateBuffer(_allocator, &bufferInfo, &vmaallocInfo, &newBuffer.buffer, &newBuffer.allocation, &newBuffer.info));
@@ -26,7 +26,7 @@ AllocatedBuffer Vk_Backend::create_buffer(size_t allocSize, VkBufferUsageFlags u
 	return newBuffer;
 }
 
-void Vk_Backend::destroy_buffer(const AllocatedBuffer& buffer) {
+void Vk_Backend::destroy_buffer(const Allocated_Buffer& buffer) {
 	vmaDestroyBuffer(_allocator, buffer.buffer, buffer.allocation);
 }
 

@@ -20,8 +20,8 @@ public:
 
 	void init(VkDevice device, VmaAllocator allocator);
 
-	AllocatedBuffer create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
-	void destroy_buffer(const AllocatedBuffer& buffer);
+	Allocated_Buffer create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
+	void destroy_buffer(const Allocated_Buffer& buffer);
 
 	void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
 };
