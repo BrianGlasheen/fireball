@@ -1,11 +1,17 @@
 #version 450
 #extension GL_EXT_buffer_reference : require
 
-layout (location = 0) out vec3 outColor;
-layout (location = 1) out vec2 outUV;
-layout (location = 2) flat out uint outTextureID;
-layout (location = 3) flat out float outAlphaCutoff;
-layout (location = 4) flat out uint outBlendMode;
+layout (location = 0) out vec3 out_color;
+layout (location = 1) out vec2 out_uv;
+layout (location = 2) out vec3 out_normal;
+
+layout (location = 3) flat out uint out_albedo;
+layout (location = 4) flat out uint out_normal_map;
+layout (location = 5) flat out float out_alpha_cutoff;
+layout (location = 6) flat out uint out_blending;
+
+layout (location = 7) out vec3 out_world_pos;
+layout (location = 8) out mat3 out_TBN;
 
 struct Vertex {
 	vec3 position;
@@ -13,13 +19,15 @@ struct Vertex {
 	vec3 normal;
 	float uv_y;
 	vec4 color;
+	vec3 tangent;
+	int padding;
 };
 
 struct Material {
     uint albedo;
+    uint normal;
     float alpha_cutoff;
     uint blending;
-    uint padding;
 };
 
 layout(buffer_reference, std430) readonly buffer VertexBuffer { 
@@ -49,12 +57,25 @@ void main() {
 	mat4 model = PushConstants.transformBuffer.transforms[gl_InstanceIndex];
 	Material material =  PushConstants.materialBuffer.materials[gl_InstanceIndex];
 
-	gl_Position = PushConstants.projection * (PushConstants.view * (model * vec4(v.position, 1.0f)));
-	outColor = v.color.xyz;
-	outUV.x = v.uv_x;
-	outUV.y = v.uv_y;
+	vec4 world_pos = model * vec4(v.position, 1.0f);
+    gl_Position = PushConstants.projection * (PushConstants.view * world_pos);
 
-	outTextureID = material.albedo;
-	outAlphaCutoff = material.alpha_cutoff;
-	outBlendMode = material.blending;
+	mat3 normalMatrix = transpose(inverse(mat3(model)));
+    vec3 T = normalize(normalMatrix * v.tangent.xyz);
+    vec3 N = normalize(normalMatrix * v.normal);
+    T = normalize(T - dot(T, N) * N);
+    vec3 B = cross(N, T);
+    
+    out_TBN = mat3(T, B, N);
+
+	out_world_pos = world_pos.xyz;
+	out_color = v.color.xyz;
+	out_uv.x = v.uv_x;
+	out_uv.y = v.uv_y;
+	out_normal = v.normal;
+	
+	out_albedo = material.albedo;
+	out_normal_map = material.normal;
+	out_alpha_cutoff = material.alpha_cutoff;
+	out_blending = material.blending;
 }

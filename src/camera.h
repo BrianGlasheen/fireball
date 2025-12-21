@@ -63,7 +63,6 @@ public:
         return result;
     }
 
-    // processes input received from a mouse input system. Expects the offset value in both the x and y direction.
     void update(double xpos, double ypos) {
         float xoffset = xpos - lastX;
         float yoffset = lastY - ypos;
@@ -100,7 +99,7 @@ public:
         if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
             movement.y += 1.0f;
         if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS)
-            movement.y += 1.0f;
+            movement.y -= 1.0f;
 
         if (glm::length(movement) > 0.0f)
             movement = glm::normalize(movement);
@@ -108,13 +107,6 @@ public:
         if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS)
             movement *= 100.0f;
             
-
-        // Handle jumping
-        //if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && player_physics.isOnGround) {
-        //    player_physics.velocity.y = JUMP_FORCE;
-        //    player_physics.isOnGround = false;
-        //}
-
         glm::vec3 acceleration = front * movement.z + right * movement.x;
 
         position += acceleration * (float)dt;

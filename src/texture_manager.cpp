@@ -69,10 +69,15 @@ namespace Texture_Manager {
 
 		uint32_t black = glm::packUnorm4x8(vec4(0, 0, 0, 0));
 		uint32_t magenta = glm::packUnorm4x8(vec4(1, 0, 1, 1));
+		uint32_t normal = glm::packUnorm4x8(vec4(0, 0, 1, 0));
 
 		Texture& black_texture = textures["black"];
 		black_texture.allocated_image = create_image((void*)&black, VkExtent3D{ 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
 		black_texture.bindless_id = add_bindless_texture(black_texture.allocated_image);
+
+		Texture& normal_texture = textures["normal"];
+		normal_texture.allocated_image = create_image((void*)&normal, VkExtent3D{ 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
+		normal_texture.bindless_id = add_bindless_texture(normal_texture.allocated_image);
 		
 		//checkerboard image
 		std::array<uint32_t, 16 * 16 > pixels; //for 16x16 checkerboard texture
@@ -92,6 +97,7 @@ namespace Texture_Manager {
 
 			free_texture("error");
 			free_texture("black");
+			free_texture("normal");
 		});
     }
 

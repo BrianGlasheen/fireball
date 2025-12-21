@@ -21,8 +21,8 @@ struct Vertex {
     vec3 normal;
     float uv_y;
     vec4 color;
-    // tangents
-    // maybe bitangents
+    vec3 tangent;
+    int padding;
 };
 
 struct Mesh_Opt_Flags {

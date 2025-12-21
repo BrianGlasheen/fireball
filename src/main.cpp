@@ -242,7 +242,7 @@ void create_swapchain(uint32_t width, uint32_t height) {
 		.set_desired_extent(width, height)
 		.add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
 		.build()
-		.value();
+	.value();
 
 	_swapchainExtent = vkbSwapchain.extent;
 	//store swapchain and its related images
@@ -901,6 +901,7 @@ GPU_Mesh_Buffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vert
 
 			GPU_Material material;
 			material.albedo = mesh.material.albedo;
+			material.normal = mesh.material.normal;
 			material.alpha_cutoff = mesh.material.alpha_cutoff;
 			material.blending = mesh.material.blend ? 1 : 0;
 			materials.push_back(material);
@@ -1013,11 +1014,12 @@ GPU_Mesh_Buffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vert
 }
 
 void init_models() {
-	Model_Manager::load_model("submarine/scene.gltf", Mesh_Opt_Flags_All);
+	//Model_Manager::load_model("submarine/scene.gltf", Mesh_Opt_Flags_All);
 	//Model_Manager::load_model("bistro/bistro.gltf");
 	//Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
 	//Model_Manager::load_model("house/scene.gltf");
-	
+	Model_Manager::load_model("factory/scene.gltf");
+
 	geometry_buffer = upload_mesh(Model_Manager::get_indices(), Model_Manager::get_vertices());
 
 	_mainDeletionQueue.push_function([&]() {

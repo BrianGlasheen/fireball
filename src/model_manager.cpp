@@ -166,6 +166,15 @@ namespace Model_Manager {
             if (ai_mesh->mTextureCoords[0]) {
                 vertex.uv_x = ai_mesh->mTextureCoords[0][i].x;
                 vertex.uv_y = ai_mesh->mTextureCoords[0][i].y;
+
+                vertex.tangent = vec3(
+                    ai_mesh->mTangents[i].x,
+                    ai_mesh->mTangents[i].y,
+                    ai_mesh->mTangents[i].z
+                );
+            }
+            else {
+                vertex.tangent = vec3(1.0f, 0.0f, 0.0f);
             }
 
             if (ai_mesh->HasVertexColors(0)) {
@@ -180,7 +189,7 @@ namespace Model_Manager {
                 vertex.color = vec4(1.0f);
             }
 
-            vertex_buffer[i]  = vertex;
+            vertex_buffer[i] = vertex;
         }
 
         uint32_t index = 0;
@@ -307,9 +316,16 @@ namespace Model_Manager {
             else {
                 mesh_material.albedo = Texture_Manager::get_by_name("error").bindless_id;
             }
+
+            if (material->GetTextureCount(aiTextureType_NORMALS)) {
+                aiString str;
+                material->GetTexture(aiTextureType_NORMALS, 0, &str);
+                mesh_material.normal = Texture_Manager::load(path + str.C_Str());
+            }
+            else {
+                mesh_material.normal = Texture_Manager::get_by_name("normal").bindless_id;
+            }
         }
-        
-        // get normal map else default normal
 
         float alpha_cutoff = 0.5f;
         mesh_material.blend = false;
