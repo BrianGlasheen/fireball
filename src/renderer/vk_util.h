@@ -15,6 +15,8 @@
         }																		  \
     } while (0)
 
+void check_vk_result(VkResult err);
+
 VkImageCreateInfo image_create_info(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent);
 VkImageViewCreateInfo imageview_create_info(VkFormat format, VkImage image, VkImageAspectFlags aspectFlags);
 VkCommandBufferAllocateInfo command_buffer_allocate_info(VkCommandPool pool, uint32_t count /*= 1*/, VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
@@ -31,3 +33,5 @@ VkRenderingAttachmentInfo depth_attachment_info(VkImageView view, VkImageLayout 
 VkRenderingInfo rendering_info(VkExtent2D renderExtent, VkRenderingAttachmentInfo* colorAttachment, VkRenderingAttachmentInfo* depthAttachment);
 
 void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout currentLayout, VkImageLayout newLayout);
+void copy_image_to_image(VkCommandBuffer cmd, VkImage source, VkImage destination, VkExtent2D srcSize, VkExtent2D dstSize);
+bool load_shader_module(const char* filePath, VkDevice device, VkShaderModule * outShaderModule);

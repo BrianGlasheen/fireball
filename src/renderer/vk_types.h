@@ -30,6 +30,14 @@ struct Allocated_Buffer {
 	Vma_Allocation_Info info;
 };
 
+struct AllocatedImage {
+	VkImage image;
+	VkImageView imageView;
+	VmaAllocation allocation;
+	VkExtent3D imageExtent;
+	VkFormat imageFormat;
+};
+
 struct GPU_Mesh_Buffers {
 	Allocated_Buffer vertex_buffer;
 	Allocated_Buffer index_buffer;

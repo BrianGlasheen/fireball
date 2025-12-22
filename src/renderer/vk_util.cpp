@@ -1,5 +1,15 @@
 #include "vk_util.h"
 
+#include <fstream>
+
+void check_vk_result(VkResult err) {
+	if (err == VK_SUCCESS)
+		return;
+	fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
+	if (err < 0)
+		abort();
+}
+
 VkImageCreateInfo image_create_info(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent) {
 	VkImageCreateInfo info = {};
 	info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -210,4 +220,76 @@ void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout currentL
 	depInfo.pImageMemoryBarriers = &imageBarrier;
 
 	vkCmdPipelineBarrier2(cmd, &depInfo);
+}
+
+void copy_image_to_image(VkCommandBuffer cmd, VkImage source, VkImage destination, VkExtent2D srcSize, VkExtent2D dstSize) {
+	VkImageBlit2 blitRegion{ .sType = VK_STRUCTURE_TYPE_IMAGE_BLIT_2, .pNext = nullptr };
+
+	blitRegion.srcOffsets[1].x = srcSize.width;
+	blitRegion.srcOffsets[1].y = srcSize.height;
+	blitRegion.srcOffsets[1].z = 1;
+
+	blitRegion.dstOffsets[1].x = dstSize.width;
+	blitRegion.dstOffsets[1].y = dstSize.height;
+	blitRegion.dstOffsets[1].z = 1;
+
+	blitRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	blitRegion.srcSubresource.baseArrayLayer = 0;
+	blitRegion.srcSubresource.layerCount = 1;
+	blitRegion.srcSubresource.mipLevel = 0;
+
+	blitRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	blitRegion.dstSubresource.baseArrayLayer = 0;
+	blitRegion.dstSubresource.layerCount = 1;
+	blitRegion.dstSubresource.mipLevel = 0;
+
+	VkBlitImageInfo2 blitInfo{ .sType = VK_STRUCTURE_TYPE_BLIT_IMAGE_INFO_2, .pNext = nullptr };
+	blitInfo.dstImage = destination;
+	blitInfo.dstImageLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	blitInfo.srcImage = source;
+	blitInfo.srcImageLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	blitInfo.filter = VK_FILTER_LINEAR;
+	blitInfo.regionCount = 1;
+	blitInfo.pRegions = &blitRegion;
+
+	vkCmdBlitImage2(cmd, &blitInfo);
+}
+
+bool load_shader_module(const char* filePath, VkDevice device, VkShaderModule* outShaderModule) {
+	// open the file. With cursor at the end
+	std::ifstream file(filePath, std::ios::ate | std::ios::binary);
+
+	if (!file.is_open()) {
+		return false;
+	}
+
+	// find what the size of the file is by looking up the location of the cursor
+	// because the cursor is at the end, it gives the size directly in bytes
+	size_t fileSize = (size_t)file.tellg();
+
+	// spirv expects the buffer to be on uint32, so make sure to reserve a int
+	// vector big enough for the entire file
+	std::vector<uint32_t> buffer(fileSize / sizeof(uint32_t));
+
+	file.seekg(0);
+	file.read((char*)buffer.data(), fileSize);
+	file.close();
+
+	// create a new shader module, using the buffer we loaded
+	VkShaderModuleCreateInfo createInfo = {};
+	createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	createInfo.pNext = nullptr;
+
+	// codeSize has to be in bytes, so multply the ints in the buffer by size of
+	// int to know the real size of the buffer
+	createInfo.codeSize = buffer.size() * sizeof(uint32_t);
+	createInfo.pCode = buffer.data();
+
+	// check that the creation goes well.
+	VkShaderModule shaderModule;
+	if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+		return false;
+	}
+	*outShaderModule = shaderModule;
+	return true;
 }

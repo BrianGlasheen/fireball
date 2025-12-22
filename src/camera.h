@@ -1,11 +1,10 @@
 #pragma once
 
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
-
 #define NEAR_PLANE 0.1f
 
 #include "util/math.h"
+
+#include <GLFW/glfw3.h>
 
 const float YAW = -90.0f;
 const float PITCH = 0.0f;

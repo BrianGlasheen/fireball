@@ -8,14 +8,6 @@
 #include <cstdint>
 #include <map>
 
-struct AllocatedImage {
-    VkImage image;
-    VkImageView imageView;
-    VmaAllocation allocation;
-    VkExtent3D imageExtent;
-    VkFormat imageFormat;
-};
-
 struct Texture {
     AllocatedImage allocated_image;
     uint32_t bindless_id;

@@ -44,6 +44,7 @@ add_executable(
 # visual studio stuff
 source_group("ImGui" FILES ${IMGUI_SOURCES})
 source_group("Shaders" FILES ${GLSL_SOURCE_FILES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${CPP_SOURCE_FILES})
 
 target_compile_definitions(
     ${PROJECT_NAME}
