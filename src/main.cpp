@@ -3,7 +3,7 @@
 #include "asset/texture_manager.h"
 #include "renderer/vk_util.h"
 #include "renderer/vk_backend.h"
-//#include "scene/scene.h"
+#include "scene/scene.h"
 #include "util/math.h"
 
 #define GLFW_INCLUDE_VULKAN
@@ -228,6 +228,11 @@ int main() {
 	Model_Manager::init("../resources/models/");
 	init_models();
 
+	Scene scene;
+
+	for (int i = 0; i < 10; i++)
+		scene.create_entity();
+
 	Camera camera;
 
 	double dt;
@@ -282,7 +287,6 @@ int main() {
 		ImGui::NewFrame();
 
 		if (ImGui::Begin("Camera Controls")) {
-			// Position sliders
 			ImGui::SliderFloat("X", &camera.position.x, -5000.0f, 5000.0f);
 			ImGui::SliderFloat("Y", &camera.position.y, -5000.0f, 5000.0f);
 			ImGui::SliderFloat("Z", &camera.position.z, -5000.0f, 5000.0f);
@@ -296,6 +300,46 @@ int main() {
 			ImGui::End();
 		}
 
+		ImGui::Begin("Entity Viewer");
+
+		scene.world.defer_begin();
+		scene.world.each<Transform_Component>(
+			[](flecs::entity e, const Transform_Component& t) {
+
+				const char* name = e.get<Name_Component>().string.c_str();
+
+				ImGuiTreeNodeFlags flags =
+					ImGuiTreeNodeFlags_OpenOnArrow |
+					ImGuiTreeNodeFlags_OpenOnDoubleClick |
+					ImGuiTreeNodeFlags_SpanAvailWidth |
+					ImGuiTreeNodeFlags_Leaf;
+
+				bool node_open = ImGui::TreeNodeEx((void*)(intptr_t)e.id(), flags, "%s", name);
+
+				if (ImGui::BeginPopupContextItem()) {
+					if (ImGui::MenuItem("Delete")) {
+						e.destruct();
+						ImGui::EndPopup();
+						if (node_open) ImGui::TreePop();
+						return;
+					}
+					ImGui::EndPopup();
+				}
+
+				if (ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+					ImGui::Text("Position: %.2f, %.2f, %.2f", t.position.x, t.position.y, t.position.z);
+					ImGui::EndTooltip();
+				}
+
+				if (node_open) {
+					ImGui::TreePop();
+				}
+			}
+		);
+		scene.world.defer_end();
+
+		ImGui::End();
 		ImGui::Render();
 
 		if (!ImGui::GetIO().WantCaptureMouse) {

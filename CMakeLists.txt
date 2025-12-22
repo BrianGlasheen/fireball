@@ -86,6 +86,7 @@ add_subdirectory(external/vk-bootstrap)
 add_subdirectory(external/vma)
 add_subdirectory(external/assimp)
 add_subdirectory(external/meshoptimizer)
+add_subdirectory(external/flecs)
 
 target_include_directories(${PROJECT_NAME}
     PRIVATE
@@ -111,6 +112,7 @@ target_link_libraries(
         GPUOpen::VulkanMemoryAllocator
         assimp
         meshoptimizer
+        flecs::flecs_static
 )
 
 find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)

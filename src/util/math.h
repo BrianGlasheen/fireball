@@ -32,7 +32,7 @@ using glm::uvec4;
 using glm::radians;
 using glm::value_ptr;
 using glm::mat4_cast;
-using glm::scale;
+//using glm::scale;
 using glm::translate;
 using glm::rotate;
 using glm::max;
