@@ -5,6 +5,7 @@
 
 #include <flecs.h>
 
+#include <functional>
 #include <string>
 
 using Entity = flecs::entity ;
@@ -22,6 +23,10 @@ public:
 
     Entity create_entity(const std::string& name = "Entity");
     void remove_entity(Entity e);
+
+    void show_entity_inspector();
+    template<typename T>
+    bool display_component(Entity e, const char* name, std::function<void(T&)> ui_func);
 
     flecs::world world;
 };

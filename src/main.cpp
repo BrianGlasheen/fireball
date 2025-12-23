@@ -42,7 +42,7 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 
 bool validation_layers = true;
 float main_scale;
-uint32_t width = 1280, height = 960;
+uint32_t width = 2000, height = 1000;
 float renderScale = 1.0f;
 
 Vk_Backend renderer;
@@ -175,25 +175,6 @@ GPU_Mesh_Buffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vert
 	return mesh_buffer;
 }
 
-void init_models() {
-	//Model_Manager::load_model("submarine/scene.gltf", Mesh_Opt_Flags_All);
-	//Model_Manager::load_model("bistro/bistro.gltf");
-	Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
-	Model_Manager::load_model("house/scene.gltf");
-	//Model_Manager::load_model("factory/scene.gltf");
-
-	renderer.geometry_buffer = upload_mesh(Model_Manager::get_indices(), Model_Manager::get_vertices());
-
-	renderer._mainDeletionQueue.push_function([&]() {
-		renderer.destroy_buffer(renderer.geometry_buffer.index_buffer);
-		renderer.destroy_buffer(renderer.geometry_buffer.vertex_buffer);
-		renderer.destroy_buffer(renderer.geometry_buffer.transform_buffer);
-		renderer.destroy_buffer(renderer.geometry_buffer.material_buffer);
-		renderer.destroy_buffer(renderer.opaque_command_buffer);
-		renderer.destroy_buffer(renderer.transparent_command_buffer);
-	});
-}
-
 int main() {
     printf("hello vk\n");
 
@@ -226,12 +207,30 @@ int main() {
 
 	Texture_Manager::init(&renderer);
 	Model_Manager::init("../resources/models/");
-	init_models();
 
 	Scene scene;
 
-	for (int i = 0; i < 10; i++)
-		scene.create_entity();
+	for (int i = 0; i < 5; i++)
+		scene.create_entity(std::to_string(i));
+
+	//Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
+	Model_Handle house = Model_Manager::load_model("house/scene.gltf");
+	//Model_Manager::load_model("factory/scene.gltf")
+
+	Entity e = scene.create_entity();
+	e.set<Model_Component>({ house });
+
+
+	renderer.geometry_buffer = upload_mesh(Model_Manager::get_indices(), Model_Manager::get_vertices());
+
+	renderer._mainDeletionQueue.push_function([&]() {
+		renderer.destroy_buffer(renderer.geometry_buffer.index_buffer);
+		renderer.destroy_buffer(renderer.geometry_buffer.vertex_buffer);
+		renderer.destroy_buffer(renderer.geometry_buffer.transform_buffer);
+		renderer.destroy_buffer(renderer.geometry_buffer.material_buffer);
+		renderer.destroy_buffer(renderer.opaque_command_buffer);
+		renderer.destroy_buffer(renderer.transparent_command_buffer);
+	});
 
 	Camera camera;
 
@@ -300,46 +299,8 @@ int main() {
 			ImGui::End();
 		}
 
-		ImGui::Begin("Entity Viewer");
+		scene.show_entity_inspector();
 
-		scene.world.defer_begin();
-		scene.world.each<Transform_Component>(
-			[](flecs::entity e, const Transform_Component& t) {
-
-				const char* name = e.get<Name_Component>().string.c_str();
-
-				ImGuiTreeNodeFlags flags =
-					ImGuiTreeNodeFlags_OpenOnArrow |
-					ImGuiTreeNodeFlags_OpenOnDoubleClick |
-					ImGuiTreeNodeFlags_SpanAvailWidth |
-					ImGuiTreeNodeFlags_Leaf;
-
-				bool node_open = ImGui::TreeNodeEx((void*)(intptr_t)e.id(), flags, "%s", name);
-
-				if (ImGui::BeginPopupContextItem()) {
-					if (ImGui::MenuItem("Delete")) {
-						e.destruct();
-						ImGui::EndPopup();
-						if (node_open) ImGui::TreePop();
-						return;
-					}
-					ImGui::EndPopup();
-				}
-
-				if (ImGui::IsItemHovered()) {
-					ImGui::BeginTooltip();
-					ImGui::Text("Position: %.2f, %.2f, %.2f", t.position.x, t.position.y, t.position.z);
-					ImGui::EndTooltip();
-				}
-
-				if (node_open) {
-					ImGui::TreePop();
-				}
-			}
-		);
-		scene.world.defer_end();
-
-		ImGui::End();
 		ImGui::Render();
 
 		if (!ImGui::GetIO().WantCaptureMouse) {

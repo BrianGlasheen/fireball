@@ -1,5 +1,6 @@
 #pragma once
 
+#include "asset/model_manager.h"
 #include "util/math.h"
 
 #include <string>
@@ -21,7 +22,7 @@ struct Physics_Component {
 };
 
 struct Model_Component {
-
+	Model_Handle handle;
 };
 
 struct Light_Component {
