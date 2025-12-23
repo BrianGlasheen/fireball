@@ -24,6 +24,8 @@ int Vk_Backend::init(GLFWwindow* window, uint32_t w, uint32_t h, bool validation
 	init_descriptors();
 	init_bindless_descriptors();
 	init_pipelines();
+	init_draw_buffers();
+	//init_mesh_cull_descriptors();
 	init_imgui(window);
 
 	return 0;
@@ -84,8 +86,11 @@ int Vk_Backend::init_vulkan(GLFWwindow* window, bool validation_layers) {
 	features12.descriptorBindingSampledImageUpdateAfterBind = true;
 	features12.descriptorBindingStorageImageUpdateAfterBind = true;
 
+	features12.drawIndirectCount = true;
+
 	VkPhysicalDeviceFeatures features = {};
 	features.multiDrawIndirect = true;
+	features.fragmentStoresAndAtomics = true;
 
 	//use vkbootstrap to select a gpu. 
 	//We want a gpu that can write to the SDL surface and supports vulkan 1.3 with the correct features
@@ -277,6 +282,7 @@ void Vk_Backend::init_commands() {
 void Vk_Backend::init_descriptors() {
 	std::vector<DescriptorAllocator::PoolSizeRatio> sizes = {
 		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
+		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 7 },
 	};
 
 	globalDescriptorAllocator.init_pool(_device, 10, sizes);
@@ -366,6 +372,21 @@ void Vk_Backend::init_bindless_descriptors() {
 	_mainDeletionQueue.push_function([=]() {
 		vkDestroyDescriptorSetLayout(_device, layout, nullptr);
 		vkDestroyDescriptorPool(_device, bindlessPool, nullptr);
+	});
+}
+
+void Vk_Backend::init_draw_buffers() {
+	opaque_command_buffer = create_buffer(MAX_DRAW_COMMANDS * sizeof(VkDrawIndexedIndirectCommand), VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	transparent_command_buffer = create_buffer(MAX_DRAW_COMMANDS * sizeof(VkDrawIndexedIndirectCommand), VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	command_count_buffer = create_buffer(sizeof(Command_Counts), VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	_mainDeletionQueue.push_function([&]() {
+		destroy_buffer(opaque_command_buffer);
+		destroy_buffer(transparent_command_buffer);
+		destroy_buffer(command_count_buffer);
 	});
 }
 
@@ -475,10 +496,222 @@ void Vk_Backend::init_draw_pipeline() {
 	});
 }
 
+void Vk_Backend::init_mesh_cull_pipeline() {
+	std::vector<VkDescriptorSetLayoutBinding> bindings;
+
+	bindings.push_back({
+		.binding = 0,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+	});
+
+	bindings.push_back({
+		.binding = 1,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+	});
+
+	bindings.push_back({
+		.binding = 2,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+	});
+
+	bindings.push_back({
+		.binding = 3,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+	});
+
+	bindings.push_back({
+		.binding = 4,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+	});
+
+	bindings.push_back({
+		.binding = 5,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+	});
+
+	bindings.push_back({
+		.binding = 6,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.descriptorCount = 1,
+		.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT
+	});
+
+	VkDescriptorSetLayoutCreateInfo layoutInfo{};
+	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = bindings.size();
+	layoutInfo.pBindings = bindings.data();
+
+	VK_CHECK(vkCreateDescriptorSetLayout(_device, &layoutInfo, nullptr, &mesh_cull_descriptor_layout));
+
+	VkPushConstantRange pushConstantRange{};
+	pushConstantRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	pushConstantRange.offset = 0;
+	pushConstantRange.size = sizeof(Cull_Push_Constants);
+
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutInfo.setLayoutCount = 1;
+	pipelineLayoutInfo.pSetLayouts = &mesh_cull_descriptor_layout;
+	pipelineLayoutInfo.pushConstantRangeCount = 1;
+	pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
+	VK_CHECK(vkCreatePipelineLayout(_device, &pipelineLayoutInfo, nullptr, &mesh_cull_pipeline_layout));
+
+	VkShaderModule cullShader;
+	if (!load_shader_module("spirv/mesh_cull.comp.spv", _device, &cullShader)) {
+		printf("Error when building the mesh cull compute shader\n");
+		assert(false);
+	}
+
+	VkPipelineShaderStageCreateInfo stageInfo{};
+	stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+	stageInfo.module = cullShader;
+	stageInfo.pName = "main";
+
+	VkComputePipelineCreateInfo pipelineInfo{};
+	pipelineInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+	pipelineInfo.layout = mesh_cull_pipeline_layout;
+	pipelineInfo.stage = stageInfo;
+
+	VK_CHECK(vkCreateComputePipelines(_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &mesh_cull_pipeline));
+
+	vkDestroyShaderModule(_device, cullShader, nullptr);
+
+	_mainDeletionQueue.push_function([=]() {
+		vkDestroyPipeline(_device, mesh_cull_pipeline, nullptr);
+		vkDestroyPipelineLayout(_device, mesh_cull_pipeline_layout, nullptr);
+		vkDestroyDescriptorSetLayout(_device, mesh_cull_descriptor_layout, nullptr);
+	});
+}
+
+void Vk_Backend::init_mesh_cull_descriptors() {
+	// Allocate descriptor set
+	VkDescriptorSetAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo.descriptorPool = globalDescriptorAllocator.pool;
+	allocInfo.descriptorSetCount = 1;
+	allocInfo.pSetLayouts = &mesh_cull_descriptor_layout;
+
+	VK_CHECK(vkAllocateDescriptorSets(_device, &allocInfo, &mesh_cull_descriptor_set));
+
+	std::vector<VkWriteDescriptorSet> writes;
+
+	VkDescriptorBufferInfo opaqueCommandsInfo{};
+	opaqueCommandsInfo.buffer = opaque_command_buffer.buffer;
+	opaqueCommandsInfo.offset = 0;
+	opaqueCommandsInfo.range = VK_WHOLE_SIZE;
+	writes.push_back({
+		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.dstSet = mesh_cull_descriptor_set,
+		.dstBinding = 0,
+		.descriptorCount = 1,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.pBufferInfo = &opaqueCommandsInfo
+	});
+
+	VkDescriptorBufferInfo transparentCommandsInfo{};
+	transparentCommandsInfo.buffer = transparent_command_buffer.buffer;
+	transparentCommandsInfo.offset = 0;
+	transparentCommandsInfo.range = VK_WHOLE_SIZE;
+	writes.push_back({
+		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.dstSet = mesh_cull_descriptor_set,
+		.dstBinding = 1,
+		.descriptorCount = 1,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.pBufferInfo = &transparentCommandsInfo
+	});
+
+	// count
+	VkDescriptorBufferInfo commandCountInfo{};
+	commandCountInfo.buffer = command_count_buffer.buffer;
+	commandCountInfo.offset = 0;
+	commandCountInfo.range = VK_WHOLE_SIZE;
+	writes.push_back({
+		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.dstSet = mesh_cull_descriptor_set,
+		.dstBinding = 2,
+		.descriptorCount = 1,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.pBufferInfo = &commandCountInfo
+	});
+
+	// meshes
+	VkDescriptorBufferInfo meshBufferInfo{};
+	meshBufferInfo.buffer = geometry_buffer.mesh_buffer.buffer;
+	meshBufferInfo.offset = 0;
+	meshBufferInfo.range = VK_WHOLE_SIZE;
+	writes.push_back({
+		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.dstSet = mesh_cull_descriptor_set,
+		.dstBinding = 3,
+		.descriptorCount = 1,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.pBufferInfo = &meshBufferInfo
+	});
+
+	// render info
+	VkDescriptorBufferInfo meshRenderInfo{};
+	meshRenderInfo.buffer = geometry_buffer.mesh_render_info_buffer.buffer;
+	meshRenderInfo.offset = 0;
+	meshRenderInfo.range = VK_WHOLE_SIZE;
+	writes.push_back({
+		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.dstSet = mesh_cull_descriptor_set,
+		.dstBinding = 4,
+		.descriptorCount = 1,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.pBufferInfo = &meshRenderInfo
+	});
+
+	// transforms
+	VkDescriptorBufferInfo transformBufferInfo{};
+	transformBufferInfo.buffer = geometry_buffer.transform_buffer.buffer;
+	transformBufferInfo.offset = 0;
+	transformBufferInfo.range = VK_WHOLE_SIZE;
+	writes.push_back({
+		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.dstSet = mesh_cull_descriptor_set,
+		.dstBinding = 5,
+		.descriptorCount = 1,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.pBufferInfo = &transformBufferInfo
+	});
+
+	// materials
+	VkDescriptorBufferInfo materialBufferInfo{};
+	materialBufferInfo.buffer = geometry_buffer.material_buffer.buffer;
+	materialBufferInfo.offset = 0;
+	materialBufferInfo.range = VK_WHOLE_SIZE;
+	writes.push_back({
+		.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+		.dstSet = mesh_cull_descriptor_set,
+		.dstBinding = 6,
+		.descriptorCount = 1,
+		.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+		.pBufferInfo = &materialBufferInfo
+	});
+
+	vkUpdateDescriptorSets(_device, writes.size(), writes.data(), 0, nullptr);
+}
 
 void Vk_Backend::init_pipelines() {
 	init_background_pipelines();
 	init_draw_pipeline();
+	init_mesh_cull_pipeline();
 }
 
 void Vk_Backend::init_imgui(GLFWwindow* window) {
@@ -649,6 +882,8 @@ void Vk_Backend::render(const mat4& projection, const mat4& view) {
 
 	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
+	generate_draw_commands(cmd);
+
 	//make the swapchain image into writeable mode before rendering
 	transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
@@ -731,6 +966,41 @@ void Vk_Backend::render(const mat4& projection, const mat4& view) {
 	_frameNumber++;
 }
 
+void Vk_Backend::generate_draw_commands(VkCommandBuffer cmd) {
+	vkCmdFillBuffer(cmd, command_count_buffer.buffer, 0, sizeof(Command_Counts), 0);
+
+	VkMemoryBarrier resetBarrier{};
+	resetBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+	resetBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	resetBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+	vkCmdPipelineBarrier(cmd,
+		VK_PIPELINE_STAGE_TRANSFER_BIT,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		0, 1, &resetBarrier, 0, nullptr, 0, nullptr);
+
+	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, mesh_cull_pipeline);
+	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, mesh_cull_pipeline_layout, 0, 1, &mesh_cull_descriptor_set, 0, nullptr);
+
+	Cull_Push_Constants pc;
+	pc.mesh_count = total_mesh_count;
+	//pc.selected_lod = lod;
+	//pc.camera_pos = camera_position;
+	vkCmdPushConstants(cmd, mesh_cull_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+
+	uint32_t dispatch_count = (total_mesh_count + 255) / 256;
+	vkCmdDispatch(cmd, dispatch_count, 1, 1);
+
+	// barrier for culling
+	VkMemoryBarrier barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+	barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+	barrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
+	vkCmdPipelineBarrier(cmd,
+		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+		VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
+		0, 1, &barrier, 0, nullptr, 0, nullptr);
+}
+
 void Vk_Backend::draw_background(VkCommandBuffer cmd) {
 	//make a clear-color from frame number. This will flash with a 120 frame period.
 	VkClearColorValue clearValue;
@@ -806,14 +1076,20 @@ void Vk_Backend::draw_geometry(VkCommandBuffer cmd, const mat4& projection, cons
 	vkCmdBindIndexBuffer(cmd, geometry_buffer.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
 	// draw
-	vkCmdDrawIndexedIndirect(cmd, opaque_command_buffer.buffer,
-		0, opaque_count, sizeof(VkDrawIndexedIndirectCommand));
+	vkCmdDrawIndexedIndirectCount(cmd,
+		opaque_command_buffer.buffer, 0,
+		command_count_buffer.buffer, offsetof(Command_Counts, opaque),
+		MAX_DRAW_COMMANDS,
+		sizeof(VkDrawIndexedIndirectCommand));
 
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, transparent_pipeline);
 
 	// draw
-	vkCmdDrawIndexedIndirect(cmd, transparent_command_buffer.buffer,
-		0, transparent_count, sizeof(VkDrawIndexedIndirectCommand));
+	vkCmdDrawIndexedIndirectCount(cmd,
+		transparent_command_buffer.buffer, 0,
+		command_count_buffer.buffer, offsetof(Command_Counts, transparent),
+		MAX_DRAW_COMMANDS,
+		sizeof(VkDrawIndexedIndirectCommand));
 
 	vkCmdEndRendering(cmd);
 }

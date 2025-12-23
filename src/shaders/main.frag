@@ -40,7 +40,7 @@ void main() {
 
     vec3 light_dir = normalize(vec3(0.2, 1.0, 0.0));
     float diff = max(dot(normal, light_dir), 0.0);
-    vec3 lighting = vec3(0.3) + vec3(0.7) * diff;
+    vec3 lighting = vec3(0.5) + vec3(0.7) * diff;
     
     outFragColor = vec4(color * lighting, alpha);
 }

@@ -50,10 +50,10 @@ Vk_Backend renderer;
 int lod = 0;
 
 GPU_Mesh_Buffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vertices) {
-	std::vector<VkDrawIndexedIndirectCommand> opaque_cmds;
-	std::vector<VkDrawIndexedIndirectCommand> transparent_cmds;
 	std::vector<mat4> transforms;
 	std::vector<GPU_Material> materials;
+	std::vector<GPU_Mesh_Render_Info> render_infos;
+	std::vector<GPU_Mesh> meshes;
 
 	uint32_t i = 0;
 	for (Model& model : Model_Manager::get_models()) {
@@ -68,30 +68,39 @@ GPU_Mesh_Buffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vert
 			material.blending = mesh.material.blend ? 1 : 0;
 			materials.push_back(material);
 
-			VkDrawIndexedIndirectCommand cmd;
-			cmd.indexCount = mesh.lods[lod].index_count;
-			cmd.instanceCount = 1;
-			cmd.firstIndex = mesh.lods[lod].base_index;
-			cmd.vertexOffset = mesh.base_vertex;
-			cmd.firstInstance = i;
-			i++;
+			GPU_Mesh_Render_Info mri = {
+				.transform_index = i,
+				.material_index = i
+			};
+			render_infos.push_back(mri);
 
-			if (mesh.material.blend)
-				transparent_cmds.push_back(cmd);
-			else
-				opaque_cmds.push_back(cmd);
+			GPU_Mesh gpu_mesh = {
+				.base_vertex = (int32_t)mesh.base_vertex,
+				.vertex_count = mesh.vertex_count,
+				//uint32_t enitity;
+				.mesh_render_info_index = i,
+				.flags = 0,
+				.bounding_sphere = vec4(0.0f)
+			};
+
+			for (int ii = 0; ii < NUM_LODS; ii++)
+				gpu_mesh.lods[ii] = mesh.lods[ii];
+
+			meshes.push_back(gpu_mesh);
+
+			i += 1;
 		}
 	}
 
-	renderer.opaque_count = opaque_cmds.size();
-	renderer.transparent_count = transparent_cmds.size();
+	renderer.total_mesh_count = meshes.size();
 
 	size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
 	size_t indexBufferSize = indices.size() * sizeof(uint32_t);
+
 	size_t transformBufferSize = transforms.size() * sizeof(mat4);
-	size_t materialBufferSize = materials.size() * sizeof(GPU_Material);
-	size_t opaque_cmds_size = opaque_cmds.size() * sizeof(VkDrawIndexedIndirectCommand);
-	size_t transparent_cmds_size = transparent_cmds.size() * sizeof(VkDrawIndexedIndirectCommand);
+	size_t materialBufferSize = materials.size() * sizeof(GPU_Material);	
+	size_t render_info_size = render_infos.size() * sizeof(GPU_Mesh_Render_Info);
+	size_t gpu_mesh_size = meshes.size() * sizeof(GPU_Mesh);
 
 	GPU_Mesh_Buffers mesh_buffer;
 
@@ -112,11 +121,11 @@ GPU_Mesh_Buffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vert
 	deviceAdressInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,.buffer = mesh_buffer.material_buffer.buffer };
 	renderer.gpu_push_constants.material_buffer = vkGetBufferDeviceAddress(renderer._device, &deviceAdressInfo);
 
-	renderer.opaque_command_buffer = renderer.create_buffer(opaque_cmds_size, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+	mesh_buffer.mesh_render_info_buffer = renderer.create_buffer(render_info_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	renderer.transparent_command_buffer = renderer.create_buffer(transparent_cmds_size, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+	mesh_buffer.mesh_buffer = renderer.create_buffer(gpu_mesh_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
-	Allocated_Buffer staging = renderer.create_buffer(vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize + opaque_cmds_size + transparent_cmds_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+	Allocated_Buffer staging = renderer.create_buffer(vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize + render_info_size + gpu_mesh_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
 	//void* data = staging.allocation->GetMappedData();
 	void* data;
@@ -127,8 +136,9 @@ GPU_Mesh_Buffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vert
 	memcpy((char*)data + vertexBufferSize, indices.data(), indexBufferSize);
 	memcpy((char*)data + vertexBufferSize + indexBufferSize, transforms.data(), transformBufferSize);
 	memcpy((char*)data + vertexBufferSize + indexBufferSize + transformBufferSize, materials.data(), materialBufferSize);
-	memcpy((char*)data + vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize, opaque_cmds.data(), opaque_cmds_size);
-	memcpy((char*)data + vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize + opaque_cmds_size, transparent_cmds.data(), transparent_cmds_size);
+
+	memcpy((char*)data + vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize, render_infos.data(), render_info_size);
+	memcpy((char*)data + vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize + render_info_size, meshes.data(), gpu_mesh_size);
 
 	vmaUnmapMemory(renderer._allocator, staging.allocation);
 
@@ -157,17 +167,17 @@ GPU_Mesh_Buffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vert
 		materialCopy.size = materialBufferSize;
 		vkCmdCopyBuffer(cmd, staging.buffer, mesh_buffer.material_buffer.buffer, 1, &materialCopy);
 
-		VkBufferCopy opaqueCopy = {};
-		opaqueCopy.dstOffset = 0;
-		opaqueCopy.srcOffset = vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize;
-		opaqueCopy.size = opaque_cmds_size;
-		vkCmdCopyBuffer(cmd, staging.buffer, renderer.opaque_command_buffer.buffer, 1, &opaqueCopy);
+		VkBufferCopy renderInfoCopy = {};
+		renderInfoCopy.dstOffset = 0;
+		renderInfoCopy.srcOffset = vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize;
+		renderInfoCopy.size = render_info_size;
+		vkCmdCopyBuffer(cmd, staging.buffer, mesh_buffer.mesh_render_info_buffer.buffer, 1, &renderInfoCopy);
 
-		VkBufferCopy transparentCopy = {};
-		transparentCopy.dstOffset = 0;
-		transparentCopy.srcOffset = vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize + opaque_cmds_size;
-		transparentCopy.size = transparent_cmds_size;
-		vkCmdCopyBuffer(cmd, staging.buffer, renderer.transparent_command_buffer.buffer, 1, &transparentCopy);
+		VkBufferCopy meshesCopy = {};
+		meshesCopy.dstOffset = 0;
+		meshesCopy.srcOffset = vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize + render_info_size;
+		meshesCopy.size = gpu_mesh_size;
+		vkCmdCopyBuffer(cmd, staging.buffer, mesh_buffer.mesh_buffer.buffer, 1, &meshesCopy);
 	});
 
 	renderer.destroy_buffer(staging);
@@ -214,23 +224,25 @@ int main() {
 		scene.create_entity(std::to_string(i));
 
 	//Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
-	Model_Handle house = Model_Manager::load_model("house/scene.gltf");
-	//Model_Manager::load_model("factory/scene.gltf")
+	//Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
+	//Model_Handle house = Model_Manager::load_model("house/scene.gltf");
+	Model_Manager::load_model("factory/scene.gltf");
 
-	Entity e = scene.create_entity();
-	e.set<Model_Component>({ house });
-
+	//Entity e = scene.create_entity();
+	//e.set<Model_Component>({ house });
 
 	renderer.geometry_buffer = upload_mesh(Model_Manager::get_indices(), Model_Manager::get_vertices());
 
 	renderer._mainDeletionQueue.push_function([&]() {
 		renderer.destroy_buffer(renderer.geometry_buffer.index_buffer);
 		renderer.destroy_buffer(renderer.geometry_buffer.vertex_buffer);
+		renderer.destroy_buffer(renderer.geometry_buffer.mesh_render_info_buffer);
+		renderer.destroy_buffer(renderer.geometry_buffer.mesh_buffer);
 		renderer.destroy_buffer(renderer.geometry_buffer.transform_buffer);
 		renderer.destroy_buffer(renderer.geometry_buffer.material_buffer);
-		renderer.destroy_buffer(renderer.opaque_command_buffer);
-		renderer.destroy_buffer(renderer.transparent_command_buffer);
 	});
+
+	renderer.init_mesh_cull_descriptors();
 
 	Camera camera;
 

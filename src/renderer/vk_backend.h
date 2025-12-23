@@ -8,6 +8,13 @@
 #include <functional>
 
 constexpr uint32_t FRAME_OVERLAP = 2;
+constexpr uint32_t MAX_DRAW_COMMANDS = 100'000;
+
+struct Command_Counts {
+	uint32_t opaque;
+	uint32_t transparent;
+	// CSM
+};
 
 class Vk_Backend {
 public:
@@ -39,6 +46,7 @@ public:
 	VkExtent2D _drawExtent;
 
 	DescriptorAllocator globalDescriptorAllocator;
+	//DescriptorAllocatorGrowable globalDescriptorAllocator;
 	VkDescriptorSet _drawImageDescriptors;
 	VkDescriptorSetLayout _drawImageDescriptorLayout;
 
@@ -59,9 +67,17 @@ public:
 	GPU_Push_Constants gpu_push_constants;
 	Allocated_Buffer opaque_command_buffer;
 	Allocated_Buffer transparent_command_buffer;
-	uint32_t opaque_count;
-	uint32_t transparent_count;
+	//Allocated_Buffer csm_command_buffer; multiple of these?
+	Allocated_Buffer command_count_buffer;
+
+	VkPipeline mesh_cull_pipeline;
+	VkPipelineLayout mesh_cull_pipeline_layout;
+	VkDescriptorSetLayout mesh_cull_descriptor_layout;
+	VkDescriptorSet mesh_cull_descriptor_set;
+
 	GPU_Mesh_Buffers geometry_buffer;
+
+	uint32_t total_mesh_count;
 
 	int init(GLFWwindow* window, uint32_t width, uint32_t height, bool validation_layers);
 	int init_vulkan(GLFWwindow* window, bool validation_layers);
@@ -71,15 +87,24 @@ public:
 	void resize_swapchain(GLFWwindow* window);
 	void init_sync_structures();
 	void init_commands();
+
 	void init_descriptors();
 	void init_bindless_descriptors();
+	void init_draw_buffers();
+
 	void init_background_pipelines();
 	void init_draw_pipeline();
+
+	void init_mesh_cull_pipeline();
+	void init_mesh_cull_descriptors();
+	
 	void init_pipelines();
+	
 	void init_imgui(GLFWwindow* window);
 	void cleanup();
 
 	void render(const mat4& projection, const mat4& view);
+	void generate_draw_commands(VkCommandBuffer cmd);
 	void draw_background(VkCommandBuffer cmd);
 	void draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view);
 

@@ -21,14 +21,14 @@ struct Material {
 	bool blend;
 };
 
-struct GPU_Material {
+struct alignas(16) GPU_Material {
 	uint32_t albedo;
 	uint32_t normal;
 	float alpha_cutoff;
 	uint32_t blending;
 };
 
-struct Lod {
+struct alignas(8) Lod {
 	uint32_t base_index;
 	uint32_t index_count;
 };
@@ -42,28 +42,28 @@ struct Mesh {
 	Material material;
 
 	mat4 transform; // relative to root of model
-	//vec4 bounding_sphere;
+	vec4 bounding_sphere;
 	//Util::AABB aabb;
 	//Material material;
 	std::string name;
 };
 
-//uint32_t    indexCount;
-//uint32_t    instanceCount;
-//uint32_t    firstIndex;
-//int32_t     vertexOffset;
-//uint32_t    firstInstance;
-
-struct GPU_Mesh {
-	//uint32_t base_index;
-	//uint32_t index_count;
-	//uint32_t base_vertex;
-
-	//uint32_t instance_count;
-	//uint32_t first_instance;
-
+struct GPU_Mesh_Render_Info {
 	uint32_t transform_index;
 	uint32_t material_index;
+};
+
+struct alignas(16) GPU_Mesh {
+	int32_t base_vertex;
+	uint32_t vertex_count;
+
+	Lod lods[NUM_LODS];
+
+	//uint32_t enitity;
+	uint32_t mesh_render_info_index;
+	uint32_t flags;
+
+	vec4 bounding_sphere;
 };
 
 struct Model {

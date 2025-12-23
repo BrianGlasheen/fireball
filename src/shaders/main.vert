@@ -1,5 +1,9 @@
 #version 450
+
 #extension GL_EXT_buffer_reference : require
+#extension GL_GOOGLE_include_directive: require
+
+#include "mesh.h"
 
 layout (location = 0) out vec3 out_color;
 layout (location = 1) out vec2 out_uv;
@@ -23,13 +27,6 @@ struct Vertex {
 	int padding;
 };
 
-struct Material {
-    uint albedo;
-    uint normal;
-    float alpha_cutoff;
-    uint blending;
-};
-
 layout(buffer_reference, std430) readonly buffer VertexBuffer { 
 	Vertex vertices[];
 };
@@ -51,6 +48,20 @@ layout(push_constant) uniform constants {
 	mat4 projection;
 	mat4 view;
 } PushConstants;
+
+/*
+layout (set = 0, binding = 4) buffer Mesh_Render_Infos {
+	Mesh_Render_Info mesh_render_info[];
+};
+
+layout(set = 0, binding = 5) buffer Transforms {
+	mat4 transforms[];
+};
+
+layout(set = 0, binding = 6) buffer Materials {
+	Material materials[];
+};
+*/
 
 void main() {
 	Vertex v = PushConstants.vertexBuffer.vertices[gl_VertexIndex];

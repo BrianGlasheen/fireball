@@ -1,0 +1,97 @@
+#version 450
+
+#extension GL_GOOGLE_include_directive: require
+
+#include "mesh.h"
+
+struct Cull_Data {
+	mat4 view;
+
+	float P00, P11, znear, zfar;       // symmetric projection parameters
+	float frustum[4];                  // data for left/right/top/bottom frustum planes
+	float lod_target;                   // lod target error at z=1
+	//float pyramidWidth, pyramidHeight; // depth pyramid size in texels
+
+	uint mesh_count;
+
+	int culling_enabled;
+	int lod_enabled;
+	uint padding[2];
+	// int occlusionEnabled;
+	// int clusterOcclusionEnabled;
+	// int clusterBackfaceEnabled;
+
+	// uint postPass;
+};
+
+struct Draw_Command {
+    uint index_count;
+    uint instance_count;
+    uint first_index;
+    int vertex_offset;
+    uint first_instance;
+};
+
+layout(push_constant) uniform block {
+	Cull_Data cull_data;
+};
+
+layout(set = 0, binding = 0) buffer Opaque_Commands {
+	Draw_Command opaque_commands[];
+};
+
+layout(set = 0, binding = 1) buffer Transparent_Commands {
+	Draw_Command transparent_commands[];
+};
+
+layout(set = 0, binding = 2) buffer Draw_Counts {
+	uint opaque_count;
+	uint transparent_count;
+};
+
+layout(set = 0, binding = 3) buffer Meshes {
+	Mesh meshes[];
+};
+
+layout (set = 0, binding = 4) buffer Mesh_Render_Infos {
+	Mesh_Render_Info mesh_render_info[];
+};
+
+layout(set = 0, binding = 5) buffer Transforms {
+	mat4 transforms[];
+};
+
+layout(set = 0, binding = 6) buffer Materials {
+	Material materials[];
+};
+
+layout(local_size_x = 256) in;
+
+void main() {
+    uint mesh_id = gl_GlobalInvocationID.x;
+    if (mesh_id >= cull_data.mesh_count) return;
+    
+    Mesh mesh = meshes[mesh_id];
+    //mat4 transform = transforms[mesh_id];
+
+    // frustum cull_data
+    
+    // select lod
+    uint lod = 0;
+
+    Draw_Command cmd;
+    cmd.index_count = mesh.lods[lod].index_count;
+    cmd.instance_count = 1;
+    cmd.first_index = mesh.lods[lod].base_index;
+    cmd.vertex_offset = mesh.base_vertex;
+    cmd.first_instance = mesh.render_info_index;
+
+    Material material = materials[mesh_render_info[mesh.render_info_index].material_index];
+    if (material.blending != 0) {
+        uint idx = atomicAdd(transparent_count, 1);
+        transparent_commands[idx] = cmd;
+    } else {
+        uint idx = atomicAdd(opaque_count, 1);
+        opaque_commands[idx] = cmd;
+    }
+}

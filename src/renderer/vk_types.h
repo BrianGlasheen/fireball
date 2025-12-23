@@ -42,6 +42,8 @@ struct GPU_Mesh_Buffers {
 	Allocated_Buffer vertex_buffer;
 	Allocated_Buffer index_buffer;
 
+	Allocated_Buffer mesh_buffer;
+	Allocated_Buffer mesh_render_info_buffer;
 	Allocated_Buffer transform_buffer;
 	Allocated_Buffer material_buffer;
 };
@@ -53,6 +55,26 @@ struct GPU_Push_Constants {
 	int padding[2];
 	mat4 projection;
 	mat4 view;
+};
+
+struct Cull_Push_Constants {
+	mat4 view;
+
+	float P00, P11, znear, zfar;       // symmetric projection parameters
+	float frustum[4];                  // data for left/right/top/bottom frustum planes
+	float lod_target;                   // lod target error at z=1
+	//float pyramidWidth, pyramidHeight; // depth pyramid size in texels
+
+	uint32_t mesh_count;
+
+	int culling_enabled;
+	int lod_enabled;
+	uint32_t padding[2];
+	// int occlusionEnabled;
+	// int clusterOcclusionEnabled;
+	// int clusterBackfaceEnabled;
+
+	// uint postPass;
 };
 
 struct DeletionQueue {

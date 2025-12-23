@@ -11,7 +11,13 @@ file(
     "src/shaders/*.vert"
     "src/shaders/*.frag"
 )
-# file(GLOB_RECURSE GLSL_HEADER_FILES "src/shaders/*.h")
+
+file(
+    GLOB_RECURSE
+    GLSL_HEADER_FILES
+    "src/shaders/*.h"
+)
+
 file(
     GLOB_RECURSE
     CPP_SOURCE_FILES
@@ -38,12 +44,12 @@ add_executable(
     ${PROJECT_NAME}
     ${CPP_SOURCE_FILES}
     ${GLSL_SOURCE_FILES}
+    ${GLSL_HEADER_FILES}
     ${IMGUI_SOURCES}
 )
 
 # visual studio stuff
-source_group("ImGui" FILES ${IMGUI_SOURCES})
-source_group("Shaders" FILES ${GLSL_SOURCE_FILES})
+source_group("Shaders" FILES ${GLSL_SOURCE_FILES} ${GLSL_HEADER_FILES})
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${CPP_SOURCE_FILES})
 
 target_compile_definitions(
@@ -132,7 +138,7 @@ foreach(GLSL ${GLSL_SOURCE_FILES})
     OUTPUT ${SPIRV}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${SPIRV_OUTPUT_DIR}"
     COMMAND ${GLSL_VALIDATOR} -V ${GLSL_FLAGS} ${GLSL} -o ${SPIRV}
-    DEPENDS ${GLSL}
+    DEPENDS ${GLSL} ${GLSL_HEADER_FILES}
   )
   list(APPEND SPIRV_BINARY_FILES ${SPIRV})
 endforeach()
