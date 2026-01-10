@@ -176,6 +176,18 @@ int main() {
 		//	resize_swapchain(window);
 		//}
 
+		scene.world.query<Light_Component>()
+		.each([&](Entity e, const Light_Component& light) {
+			vec3 pos = vec3(e.get<Transform_Component>().world_transform[3]);
+			renderer.debug_renderer.add_point(
+				pos,
+				vec4(light.color, 1)
+			);
+			renderer.debug_renderer.add_line(
+				pos, pos + vec3(0.0f, 10.0f, 0.0f)
+			);
+		});
+
 		ImGui_ImplVulkan_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();

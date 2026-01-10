@@ -27,6 +27,7 @@ int Vk_Backend::init(GLFWwindow* window, uint32_t w, uint32_t h, bool validation
 	init_light_buffer();
 	//init_mesh_cull_descriptors();
 	init_imgui(window);
+	debug_renderer.init(_device, _chosenGPU, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT);
 
 	return 0;
 }
@@ -1139,6 +1140,8 @@ void Vk_Backend::update_buffer_range(Allocated_Buffer& buffer, size_t element_si
 void Vk_Backend::cleanup() {
 	vkDeviceWaitIdle(_device);
 
+	debug_renderer.cleanup();
+
 	ImGui_ImplVulkan_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();
@@ -1231,6 +1234,8 @@ void Vk_Backend::render(const mat4& projection, const mat4& view) {
 
 	draw_geometry(cmd, projection, view);
 
+	debug_renderer.render(cmd, projection * view);
+
 	transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 	transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
@@ -1301,6 +1306,8 @@ void Vk_Backend::render(const mat4& projection, const mat4& view) {
 	}
 
 	_frameNumber++;
+
+	debug_renderer.clear();
 }
 
 void Vk_Backend::generate_draw_commands(VkCommandBuffer cmd) {

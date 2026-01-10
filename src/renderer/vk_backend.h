@@ -1,6 +1,7 @@
 #pragma once
 
 #include "asset/model_manager.h" // Vertex
+#include "renderer/vk_debug_backend.h"
 #include "renderer/vk_types.h"
 #include "scene/entity.h"
 #include "util/types.h"
@@ -103,6 +104,8 @@ public:
 	Allocated_Buffer material_buffer;
 
 	uint32_t total_mesh_count;
+
+	Vk_Debug_Backend debug_renderer;
 
 	int init(GLFWwindow* window, uint32_t width, uint32_t height, bool validation_layers);
 	int init_vulkan(GLFWwindow* window, bool validation_layers);

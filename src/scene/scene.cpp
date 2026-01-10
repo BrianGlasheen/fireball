@@ -35,11 +35,9 @@ Scene::Scene(Vk_Backend* _renderer) {
 
         if (parent_transform) {
             t.world_transform = parent_transform->world_transform * local_transform;
-            printf("no parent\n");
         }
         else {
             t.world_transform = local_transform;
-            printf("parent\n");
         }
 
         t.dirty = false;
@@ -81,7 +79,7 @@ Scene::Scene(Vk_Backend* _renderer) {
     .each([this](Entity e, Light_Component& light) {
         if (light.dirty || e.get<Transform_Component>().updated) {
             GPU_Light l {
-                .position_radius = vec4(vec3(e.get<Transform_Component>().position), light.range),
+                .position_radius = vec4(vec3(e.get<Transform_Component>().world_transform[3]), light.range),
                 .color_strength = vec4(light.color, light.intensity),
                 .direction_type = vec4(light.direction, light.type == Light_Component::Type::Point ? 0.0f : 1.0f),
                 .params = vec4(light.inner_cone_angle, light.outer_cone_angle, 0, 1)
@@ -89,7 +87,7 @@ Scene::Scene(Vk_Backend* _renderer) {
 
             renderer->update_light(e, l);
             light.dirty = false;
-            printf("updated light\n");
+            //printf("updated light\n");
         }
     });
 
@@ -98,7 +96,7 @@ Scene::Scene(Vk_Backend* _renderer) {
     .each([this](Entity e, const Light_Component& light) {
         //vec4 params; // inner cone, outer cone, shadow map idx, enabled 
         GPU_Light l{
-            .position_radius = vec4(vec3(e.get<Transform_Component>().position), light.range),
+            .position_radius = vec4(vec3(e.get<Transform_Component>().world_transform[3]), light.range),
             .color_strength = vec4(light.color, light.intensity),
             .direction_type = vec4(light.direction, light.type == Light_Component::Type::Point ? 0.0f : 1.0f),
             .params = vec4(light.inner_cone_angle, light.outer_cone_angle, 0, 1)
