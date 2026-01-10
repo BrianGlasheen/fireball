@@ -1,19 +1,31 @@
 #pragma once
 
-#include "vk_types.h"
+#include "asset/model_manager.h" // Vertex
+#include "renderer/vk_types.h"
+#include "scene/entity.h"
+#include "util/types.h"
 
 #include <vulkan/vk_enum_string_helper.h>
 #include <GLFW/glfw3.h>
 
 #include <functional>
+#include <span>
 
 constexpr uint32_t FRAME_OVERLAP = 2;
 constexpr uint32_t MAX_DRAW_COMMANDS = 100'000;
+constexpr uint32_t MAX_LIGHTS = 4096;
 
 struct Command_Counts {
 	uint32_t opaque;
 	uint32_t transparent;
 	// CSM
+};
+
+struct GPU_Light {
+	vec4 position_radius; // x, y ,z, radius
+	vec4 color_strength; // r g b intensity
+	vec4 direction_type; // x y z type
+	vec4 params; // inner cone, outer cone, shadow map idx, enabled 
 };
 
 class Vk_Backend {
@@ -70,12 +82,25 @@ public:
 	//Allocated_Buffer csm_command_buffer; multiple of these?
 	Allocated_Buffer command_count_buffer;
 
+	Allocated_Buffer light_buffer;
+	uint32_t num_lights;
+	std::vector<uint32_t> light_free_list;
+	std::unordered_map<ecs_entity_t, uint32_t> light_allocations;
+
 	VkPipeline mesh_cull_pipeline;
 	VkPipelineLayout mesh_cull_pipeline_layout;
 	VkDescriptorSetLayout mesh_cull_descriptor_layout;
 	VkDescriptorSet mesh_cull_descriptor_set;
 
-	GPU_Mesh_Buffers geometry_buffer;
+	Allocated_Buffer vertex_buffer;
+	Allocated_Buffer index_buffer;
+
+	Range_Allocator mesh_allocator { MAX_DRAW_COMMANDS };
+	std::unordered_map<ecs_entity_t, Range_Allocation> mesh_allocations;
+	Allocated_Buffer mesh_buffer;
+	Allocated_Buffer mesh_render_info_buffer;
+	Allocated_Buffer transform_buffer;
+	Allocated_Buffer material_buffer;
 
 	uint32_t total_mesh_count;
 
@@ -91,6 +116,7 @@ public:
 	void init_descriptors();
 	void init_bindless_descriptors();
 	void init_draw_buffers();
+	void init_light_buffer();
 
 	void init_background_pipelines();
 	void init_draw_pipeline();
@@ -101,6 +127,17 @@ public:
 	void init_pipelines();
 	
 	void init_imgui(GLFWwindow* window);
+
+	void upload_geometry(std::span<uint32_t> indices, std::span<Vertex> vertices);
+	void allocate_model(Entity e, Model_Handle handle);
+	void update_meshes(Entity e, Model_Handle handle);
+	void deallocate_model(Entity e);
+	void allocate_light(Entity e, GPU_Light light);
+	void update_light(Entity e, GPU_Light light);
+	void deallocate_light(Entity e);
+
+	void update_buffer_range(Allocated_Buffer& buffer, size_t element_size, uint32_t start_index, const void* data, uint32_t count);
+
 	void cleanup();
 
 	void render(const mat4& projection, const mat4& view);

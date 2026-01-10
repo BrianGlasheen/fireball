@@ -12,6 +12,7 @@
 #include <glm/ext/quaternion_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/packing.hpp>
+#include <glm/gtx/euler_angles.hpp>
 
 #define PI 3.14159265358979323846f
 
@@ -34,6 +35,7 @@ using glm::value_ptr;
 using glm::mat4_cast;
 //using glm::scale;
 using glm::translate;
+using glm::yawPitchRoll;
 using glm::rotate;
 using glm::max;
 using glm::min;

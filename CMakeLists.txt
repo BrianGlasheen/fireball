@@ -59,6 +59,7 @@ target_compile_definitions(
     GLM_FORCE_XYZW_ONLY
     GLM_FORCE_QUAT_DATA_XYZW
     GLM_FORCE_QUAT_CTOR_XYZW
+    GLM_ENABLE_EXPERIMENTAL
 )
 
 target_include_directories(

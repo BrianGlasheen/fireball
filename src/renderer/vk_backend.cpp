@@ -1,10 +1,9 @@
 #include "vk_backend.h"
-#include "vk_types.h"
-#include "vk_util.h"
-
-#include "pipeline.h"
 
 #include "asset/texture_manager.h"
+#include "renderer/pipeline.h"
+#include "renderer/vk_types.h"
+#include "renderer/vk_util.h"
 
 #include <VkBootstrap.h>
 #include <imgui.h>
@@ -25,6 +24,7 @@ int Vk_Backend::init(GLFWwindow* window, uint32_t w, uint32_t h, bool validation
 	init_bindless_descriptors();
 	init_pipelines();
 	init_draw_buffers();
+	init_light_buffer();
 	//init_mesh_cull_descriptors();
 	init_imgui(window);
 
@@ -383,10 +383,39 @@ void Vk_Backend::init_draw_buffers() {
 
 	command_count_buffer = create_buffer(sizeof(Command_Counts), VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
+	
+	transform_buffer = create_buffer(MAX_DRAW_COMMANDS * sizeof(mat4), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+	VkBufferDeviceAddressInfo deviceAdressInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = transform_buffer.buffer };
+	gpu_push_constants.transform_buffer = vkGetBufferDeviceAddress(_device, &deviceAdressInfo);
+
+	material_buffer = create_buffer(MAX_DRAW_COMMANDS * sizeof(GPU_Material), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+	deviceAdressInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,.buffer = material_buffer.buffer };
+	gpu_push_constants.material_buffer = vkGetBufferDeviceAddress(_device, &deviceAdressInfo);
+
+	mesh_render_info_buffer = create_buffer(MAX_DRAW_COMMANDS * sizeof(GPU_Mesh_Render_Info), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	mesh_buffer = create_buffer(MAX_DRAW_COMMANDS * sizeof(GPU_Mesh), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+
+
 	_mainDeletionQueue.push_function([&]() {
 		destroy_buffer(opaque_command_buffer);
 		destroy_buffer(transparent_command_buffer);
 		destroy_buffer(command_count_buffer);
+
+		destroy_buffer(transform_buffer);
+		destroy_buffer(material_buffer);
+		destroy_buffer(mesh_render_info_buffer);
+		destroy_buffer(mesh_buffer);
+	});
+}
+
+void Vk_Backend::init_light_buffer() {
+	light_buffer = create_buffer(MAX_LIGHTS * sizeof(GPU_Light), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+	VkBufferDeviceAddressInfo deviceAdressInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = light_buffer.buffer };
+	gpu_push_constants.light_buffer = vkGetBufferDeviceAddress(_device, &deviceAdressInfo);
+
+	_mainDeletionQueue.push_function([&]() {
+		destroy_buffer(light_buffer);
 	});
 }
 
@@ -454,7 +483,7 @@ void Vk_Backend::init_draw_pipeline() {
 	VkPushConstantRange pushRanges = {};
 	pushRanges.offset = 0;
 	pushRanges.size = sizeof(GPU_Push_Constants);
-	pushRanges.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	pushRanges.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
 	VkDescriptorSetLayout layouts[] = { Texture_Manager::get_bindless_descriptor_layout() };
 
@@ -651,7 +680,7 @@ void Vk_Backend::init_mesh_cull_descriptors() {
 
 	// meshes
 	VkDescriptorBufferInfo meshBufferInfo{};
-	meshBufferInfo.buffer = geometry_buffer.mesh_buffer.buffer;
+	meshBufferInfo.buffer = mesh_buffer.buffer;
 	meshBufferInfo.offset = 0;
 	meshBufferInfo.range = VK_WHOLE_SIZE;
 	writes.push_back({
@@ -665,7 +694,7 @@ void Vk_Backend::init_mesh_cull_descriptors() {
 
 	// render info
 	VkDescriptorBufferInfo meshRenderInfo{};
-	meshRenderInfo.buffer = geometry_buffer.mesh_render_info_buffer.buffer;
+	meshRenderInfo.buffer = mesh_render_info_buffer.buffer;
 	meshRenderInfo.offset = 0;
 	meshRenderInfo.range = VK_WHOLE_SIZE;
 	writes.push_back({
@@ -679,7 +708,7 @@ void Vk_Backend::init_mesh_cull_descriptors() {
 
 	// transforms
 	VkDescriptorBufferInfo transformBufferInfo{};
-	transformBufferInfo.buffer = geometry_buffer.transform_buffer.buffer;
+	transformBufferInfo.buffer = transform_buffer.buffer;
 	transformBufferInfo.offset = 0;
 	transformBufferInfo.range = VK_WHOLE_SIZE;
 	writes.push_back({
@@ -693,7 +722,7 @@ void Vk_Backend::init_mesh_cull_descriptors() {
 
 	// materials
 	VkDescriptorBufferInfo materialBufferInfo{};
-	materialBufferInfo.buffer = geometry_buffer.material_buffer.buffer;
+	materialBufferInfo.buffer = material_buffer.buffer;
 	materialBufferInfo.offset = 0;
 	materialBufferInfo.range = VK_WHOLE_SIZE;
 	writes.push_back({
@@ -797,6 +826,314 @@ void Vk_Backend::init_imgui(GLFWwindow* window) {
 	init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 	init_info.CheckVkResultFn = check_vk_result;
 	ImGui_ImplVulkan_Init(&init_info);
+}
+
+void Vk_Backend::upload_geometry(std::span<uint32_t> indices, std::span<Vertex> vertices) {
+	size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
+	size_t indexBufferSize = indices.size() * sizeof(uint32_t);
+
+	//create vertex buffer
+	vertex_buffer = create_buffer(vertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+	VkBufferDeviceAddressInfo deviceAdressInfo { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = vertex_buffer.buffer };
+	gpu_push_constants.vertex_buffer = vkGetBufferDeviceAddress(_device, &deviceAdressInfo);
+
+	//create index buffer
+	index_buffer = create_buffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	Allocated_Buffer staging = create_buffer(vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+
+	void* data;
+	vmaMapMemory(_allocator, staging.allocation, &data);
+
+	memcpy(data, vertices.data(), vertexBufferSize);
+	memcpy((char*)data + vertexBufferSize, indices.data(), indexBufferSize);
+
+	vmaUnmapMemory(_allocator, staging.allocation);
+
+	immediate_submit([&](VkCommandBuffer cmd) {
+		VkBufferCopy vertexCopy = {};
+		vertexCopy.dstOffset = 0;
+		vertexCopy.srcOffset = 0;
+		vertexCopy.size = vertexBufferSize;
+
+		vkCmdCopyBuffer(cmd, staging.buffer, vertex_buffer.buffer, 1, &vertexCopy);
+		VkBufferCopy indexCopy = {};
+		indexCopy.dstOffset = 0;
+		indexCopy.srcOffset = vertexBufferSize;
+		indexCopy.size = indexBufferSize;
+		vkCmdCopyBuffer(cmd, staging.buffer, index_buffer.buffer, 1, &indexCopy);
+	});
+
+	destroy_buffer(staging);
+
+	_mainDeletionQueue.push_function([&]() {
+		destroy_buffer(index_buffer);
+		destroy_buffer(vertex_buffer);
+	});
+}
+
+void Vk_Backend::allocate_model(Entity e, Model_Handle handle) {
+	// check if mesh_allocations[e.id()] exists
+	// if so, deallocate_model, maybe warning
+	// proceed
+
+	Model& model = Model_Manager::get_model(handle);
+	uint32_t mesh_count = model.meshes.size();
+
+	auto alloc = mesh_allocator.allocate(mesh_count);
+	if (!alloc.valid()) {
+		assert(false && "Out of mesh slots!");
+		return;
+	}
+
+	mesh_allocations[e.id()] = alloc;
+
+	printf("[ALLOC] Allocating model '%s' for entity %llu: %u meshes\n", Model_Manager::get_model_name(handle).c_str(), e.id(), mesh_count);
+
+	printf("[ALLOC] Alloc range: base=%u, count=%u\n", alloc.base, alloc.count);
+
+	std::vector<mat4> transforms;
+	std::vector<GPU_Material> materials;
+	std::vector<GPU_Mesh_Render_Info> render_infos;
+	std::vector<GPU_Mesh> meshes;
+
+	transforms.reserve(mesh_count);
+	materials.reserve(mesh_count);
+	render_infos.reserve(mesh_count);
+	meshes.reserve(mesh_count);
+
+	for (uint32_t i = 0; i < mesh_count; i++) {
+		Mesh& mesh = model.meshes[i];
+		uint32_t gpu_index = alloc.base + i;
+
+		transforms.push_back(e.get<Transform_Component>().world_transform * mesh.transform);
+
+		GPU_Material material;
+		material.albedo = mesh.material.albedo;
+		material.normal = mesh.material.normal;
+		material.alpha_cutoff = mesh.material.alpha_cutoff;
+		material.blending = mesh.material.blend ? 1 : 0; // rm me
+		materials.push_back(material);
+
+		GPU_Mesh_Render_Info render_info;
+		render_info.transform_index = gpu_index;
+		render_info.material_index = gpu_index;
+		render_infos.push_back(render_info);
+
+		GPU_Mesh gpu_mesh;
+		gpu_mesh.base_vertex = (int32_t)mesh.base_vertex;
+		gpu_mesh.vertex_count = mesh.vertex_count;
+		gpu_mesh.mesh_render_info_index = gpu_index;
+		gpu_mesh.flags = 0;
+		gpu_mesh.bounding_sphere = vec4(0.0f);
+
+		for (int lod = 0; lod < NUM_LODS; lod++)
+			gpu_mesh.lods[lod] = mesh.lods[lod];
+
+		meshes.push_back(gpu_mesh);
+
+		printf("[ALLOC] Mesh %u -> GPU index %u\n", i, gpu_index);
+	}
+
+	assert(transforms.size() == materials.size() &&
+		materials.size() == render_infos.size() &&
+		render_infos.size() == meshes.size());
+
+	uint32_t count = transforms.size();
+
+	size_t transform_size = count * sizeof(mat4);
+	size_t material_size = count * sizeof(GPU_Material);
+	size_t render_info_size = count * sizeof(GPU_Mesh_Render_Info);
+	size_t mesh_size = count * sizeof(GPU_Mesh);
+	size_t total_size = transform_size + material_size + render_info_size + mesh_size;
+
+	Allocated_Buffer staging = create_buffer(
+		total_size,
+		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		VMA_MEMORY_USAGE_CPU_ONLY
+	);
+
+	// map and copy all data
+	void* data;
+	vmaMapMemory(_allocator, staging.allocation, &data);
+
+	size_t offset = 0;
+	memcpy((char*)data + offset, transforms.data(), transform_size);
+	offset += transform_size;
+
+	memcpy((char*)data + offset, materials.data(), material_size);
+	offset += material_size;
+
+	memcpy((char*)data + offset, render_infos.data(), render_info_size);
+	offset += render_info_size;
+
+	memcpy((char*)data + offset, meshes.data(), mesh_size);
+
+	vmaUnmapMemory(_allocator, staging.allocation);
+
+	uint32_t base_index = alloc.base;
+
+	immediate_submit([&](VkCommandBuffer cmd) {
+		size_t src_offset = 0;
+
+		VkBufferCopy transform_copy = {
+			.srcOffset = src_offset,
+			.dstOffset = base_index * sizeof(mat4),
+			.size = transform_size
+		};
+		vkCmdCopyBuffer(cmd, staging.buffer, transform_buffer.buffer, 1, &transform_copy);
+		src_offset += transform_size;
+
+		VkBufferCopy material_copy = {
+			.srcOffset = src_offset,
+			.dstOffset = base_index * sizeof(GPU_Material),
+			.size = material_size
+		};
+		vkCmdCopyBuffer(cmd, staging.buffer, material_buffer.buffer, 1, &material_copy);
+		src_offset += material_size;
+
+		VkBufferCopy render_info_copy = {
+			.srcOffset = src_offset,
+			.dstOffset = base_index * sizeof(GPU_Mesh_Render_Info),
+			.size = render_info_size
+		};
+		vkCmdCopyBuffer(cmd, staging.buffer, mesh_render_info_buffer.buffer, 1, &render_info_copy);
+		src_offset += render_info_size;
+
+		VkBufferCopy mesh_copy = {
+			.srcOffset = src_offset,
+			.dstOffset = base_index * sizeof(GPU_Mesh),
+			.size = mesh_size
+		};
+		vkCmdCopyBuffer(cmd, staging.buffer, mesh_buffer.buffer, 1, &mesh_copy);
+	});
+
+	destroy_buffer(staging);
+}
+
+void Vk_Backend::update_meshes(Entity e, Model_Handle handle) {
+	auto it = mesh_allocations.find(e);
+	if (it == mesh_allocations.end()) {
+		return;
+	}
+
+	const Range_Allocation& alloc = it->second;
+	Model& model = Model_Manager::get_model(handle);
+
+	mat4 entity_transform = e.get<Transform_Component>().world_transform;
+
+	std::vector<mat4> transforms;
+	transforms.reserve(alloc.count);
+
+	for (uint32_t i = 0; i < alloc.count; i++) {
+		Mesh& mesh = model.meshes[i];
+
+		mat4 world_transform = entity_transform * mesh.transform;
+		transforms.push_back(world_transform);
+	}
+
+	update_buffer_range(transform_buffer, sizeof(mat4), alloc.base, transforms.data(), alloc.count);
+}
+
+void Vk_Backend::deallocate_model(Entity e) {
+	auto it = mesh_allocations.find(e);
+	if (it == mesh_allocations.end()) {
+		return;
+	}
+
+	mesh_allocator.free(it->second);
+
+	mesh_allocations.erase(it);
+
+	// if we shrunk max allocations, dont need to fill
+	// if we didnt, now have loose mesh data in between valid
+	// need to manually disable these from being drawn
+	// (set draw flag to false)
+}
+
+void Vk_Backend::allocate_light(Entity e, GPU_Light light) {
+	if (light_allocations.find(e) != light_allocations.end()) {
+		update_light(e, light);
+		return;
+	}
+
+	if (num_lights >= MAX_LIGHTS) {
+		assert(false && "MAX LIGHTS exceeded!");
+		return;
+	}
+
+	uint32_t new_index;
+	if (light_free_list.size() != 0) {
+		new_index = light_free_list.back();
+		light_free_list.pop_back();
+	}
+	else {
+		new_index = num_lights;
+		num_lights++;
+	}
+
+	light_allocations[e] = new_index;
+
+	update_buffer_range(light_buffer, sizeof(GPU_Light), new_index, &light, 1);
+
+	printf("[RENDERER] ADDED NEW LIGHT %d\n", num_lights);
+}
+
+void Vk_Backend::update_light(Entity e, GPU_Light light) {
+	auto it = light_allocations.find(e);
+	if (it == light_allocations.end()) {
+		return;
+	}
+
+	uint32_t index = it->second;
+
+	update_buffer_range(light_buffer, sizeof(GPU_Light), index, &light, 1);
+}
+
+void Vk_Backend::deallocate_light(Entity e) {
+	auto it = light_allocations.find(e);
+	if (it == light_allocations.end()) {
+		return;
+	}
+
+	uint32_t removed_index = it->second;
+	uint32_t last_index = num_lights - 1;
+
+	// if removing last, just remove
+	if (removed_index == last_index) {
+		light_allocations.erase(e);
+		num_lights--;
+		return;
+	}
+
+	light_free_list.push_back(removed_index);
+	light_allocations.erase(e);
+
+	GPU_Light l = {}; // zero initialized light is disabled
+	update_buffer_range(light_buffer, sizeof(GPU_Light), removed_index, &l, 1);
+}
+
+void Vk_Backend::update_buffer_range(Allocated_Buffer& buffer, size_t element_size, uint32_t start_index, const void* data, uint32_t count) {
+	size_t total_size = count * element_size;
+	size_t dst_offset = start_index * element_size;
+
+	Allocated_Buffer staging = create_buffer(total_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+
+	void* mapped;
+	vmaMapMemory(_allocator, staging.allocation, &mapped);
+	memcpy(mapped, data, total_size);
+	vmaUnmapMemory(_allocator, staging.allocation);
+
+	immediate_submit([&](VkCommandBuffer cmd) {
+		VkBufferCopy copy = {
+			.srcOffset = 0,
+			.dstOffset = dst_offset,
+			.size = total_size
+		};
+		vkCmdCopyBuffer(cmd, staging.buffer, buffer.buffer, 1, &copy);
+	});
+
+	destroy_buffer(staging);
 }
 
 void Vk_Backend::cleanup() {
@@ -983,12 +1320,13 @@ void Vk_Backend::generate_draw_commands(VkCommandBuffer cmd) {
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, mesh_cull_pipeline_layout, 0, 1, &mesh_cull_descriptor_set, 0, nullptr);
 
 	Cull_Push_Constants pc;
-	pc.mesh_count = total_mesh_count;
+	//pc.mesh_count = total_mesh_count;
+	pc.mesh_count = mesh_allocator.max_allocated;
 	//pc.selected_lod = lod;
 	//pc.camera_pos = camera_position;
 	vkCmdPushConstants(cmd, mesh_cull_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
 
-	uint32_t dispatch_count = (total_mesh_count + 255) / 256;
+	uint32_t dispatch_count = (pc.mesh_count + 255) / 256;
 	vkCmdDispatch(cmd, dispatch_count, 1, 1);
 
 	// barrier for culling
@@ -1071,9 +1409,10 @@ void Vk_Backend::draw_geometry(VkCommandBuffer cmd, const mat4& projection, cons
 
 	gpu_push_constants.projection = projection;
 	gpu_push_constants.view = view;
-	vkCmdPushConstants(cmd, draw_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(GPU_Push_Constants), &gpu_push_constants);
+	gpu_push_constants.max_lights = num_lights;
+	vkCmdPushConstants(cmd, draw_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(GPU_Push_Constants), &gpu_push_constants);
 
-	vkCmdBindIndexBuffer(cmd, geometry_buffer.index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+	vkCmdBindIndexBuffer(cmd, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
 	// draw
 	vkCmdDrawIndexedIndirectCount(cmd,

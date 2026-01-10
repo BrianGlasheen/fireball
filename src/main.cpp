@@ -49,142 +49,6 @@ Vk_Backend renderer;
 
 int lod = 0;
 
-GPU_Mesh_Buffers upload_mesh(std::span<uint32_t> indices, std::span<Vertex> vertices) {
-	std::vector<mat4> transforms;
-	std::vector<GPU_Material> materials;
-	std::vector<GPU_Mesh_Render_Info> render_infos;
-	std::vector<GPU_Mesh> meshes;
-
-	uint32_t i = 0;
-	for (Model& model : Model_Manager::get_models()) {
-		for (Mesh& mesh : model.meshes) {
-			mat4 transform = mesh.transform;
-			transforms.push_back(transform);
-
-			GPU_Material material;
-			material.albedo = mesh.material.albedo;
-			material.normal = mesh.material.normal;
-			material.alpha_cutoff = mesh.material.alpha_cutoff;
-			material.blending = mesh.material.blend ? 1 : 0;
-			materials.push_back(material);
-
-			GPU_Mesh_Render_Info mri = {
-				.transform_index = i,
-				.material_index = i
-			};
-			render_infos.push_back(mri);
-
-			GPU_Mesh gpu_mesh = {
-				.base_vertex = (int32_t)mesh.base_vertex,
-				.vertex_count = mesh.vertex_count,
-				//uint32_t enitity;
-				.mesh_render_info_index = i,
-				.flags = 0,
-				.bounding_sphere = vec4(0.0f)
-			};
-
-			for (int ii = 0; ii < NUM_LODS; ii++)
-				gpu_mesh.lods[ii] = mesh.lods[ii];
-
-			meshes.push_back(gpu_mesh);
-
-			i += 1;
-		}
-	}
-
-	renderer.total_mesh_count = meshes.size();
-
-	size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
-	size_t indexBufferSize = indices.size() * sizeof(uint32_t);
-
-	size_t transformBufferSize = transforms.size() * sizeof(mat4);
-	size_t materialBufferSize = materials.size() * sizeof(GPU_Material);	
-	size_t render_info_size = render_infos.size() * sizeof(GPU_Mesh_Render_Info);
-	size_t gpu_mesh_size = meshes.size() * sizeof(GPU_Mesh);
-
-	GPU_Mesh_Buffers mesh_buffer;
-
-	//create vertex buffer
-	mesh_buffer.vertex_buffer = renderer.create_buffer(vertexBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-	//find the adress of the vertex buffer
-	VkBufferDeviceAddressInfo deviceAdressInfo{ .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = mesh_buffer.vertex_buffer.buffer };
-	renderer.gpu_push_constants.vertex_buffer = vkGetBufferDeviceAddress(renderer._device, &deviceAdressInfo);
-
-	//create index buffer
-	mesh_buffer.index_buffer = renderer.create_buffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-
-	mesh_buffer.transform_buffer = renderer.create_buffer(transformBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-	deviceAdressInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO, .buffer = mesh_buffer.transform_buffer.buffer };
-	renderer.gpu_push_constants.transform_buffer = vkGetBufferDeviceAddress(renderer._device, &deviceAdressInfo);
-
-	mesh_buffer.material_buffer = renderer.create_buffer(materialBufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-	deviceAdressInfo = { .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,.buffer = mesh_buffer.material_buffer.buffer };
-	renderer.gpu_push_constants.material_buffer = vkGetBufferDeviceAddress(renderer._device, &deviceAdressInfo);
-
-	mesh_buffer.mesh_render_info_buffer = renderer.create_buffer(render_info_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-
-	mesh_buffer.mesh_buffer = renderer.create_buffer(gpu_mesh_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-
-	Allocated_Buffer staging = renderer.create_buffer(vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize + render_info_size + gpu_mesh_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
-
-	//void* data = staging.allocation->GetMappedData();
-	void* data;
-	vmaMapMemory(renderer._allocator, staging.allocation, &data);
-
-	// copy vertex buffer
-	memcpy(data, vertices.data(), vertexBufferSize);
-	memcpy((char*)data + vertexBufferSize, indices.data(), indexBufferSize);
-	memcpy((char*)data + vertexBufferSize + indexBufferSize, transforms.data(), transformBufferSize);
-	memcpy((char*)data + vertexBufferSize + indexBufferSize + transformBufferSize, materials.data(), materialBufferSize);
-
-	memcpy((char*)data + vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize, render_infos.data(), render_info_size);
-	memcpy((char*)data + vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize + render_info_size, meshes.data(), gpu_mesh_size);
-
-	vmaUnmapMemory(renderer._allocator, staging.allocation);
-
-	renderer.immediate_submit([&](VkCommandBuffer cmd) {
-		VkBufferCopy vertexCopy = {};
-		vertexCopy.dstOffset = 0;
-		vertexCopy.srcOffset = 0;
-		vertexCopy.size = vertexBufferSize;
-
-		vkCmdCopyBuffer(cmd, staging.buffer, mesh_buffer.vertex_buffer.buffer, 1, &vertexCopy);
-		VkBufferCopy indexCopy = {};
-		indexCopy.dstOffset = 0;
-		indexCopy.srcOffset = vertexBufferSize;
-		indexCopy.size = indexBufferSize;
-		vkCmdCopyBuffer(cmd, staging.buffer, mesh_buffer.index_buffer.buffer, 1, &indexCopy);
-
-		VkBufferCopy transformCopy = {};
-		transformCopy.dstOffset = 0;
-		transformCopy.srcOffset = vertexBufferSize + indexBufferSize;
-		transformCopy.size = transformBufferSize;
-		vkCmdCopyBuffer(cmd, staging.buffer, mesh_buffer.transform_buffer.buffer, 1, &transformCopy);
-
-		VkBufferCopy materialCopy = {};
-		materialCopy.dstOffset = 0;
-		materialCopy.srcOffset = vertexBufferSize + indexBufferSize + transformBufferSize;
-		materialCopy.size = materialBufferSize;
-		vkCmdCopyBuffer(cmd, staging.buffer, mesh_buffer.material_buffer.buffer, 1, &materialCopy);
-
-		VkBufferCopy renderInfoCopy = {};
-		renderInfoCopy.dstOffset = 0;
-		renderInfoCopy.srcOffset = vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize;
-		renderInfoCopy.size = render_info_size;
-		vkCmdCopyBuffer(cmd, staging.buffer, mesh_buffer.mesh_render_info_buffer.buffer, 1, &renderInfoCopy);
-
-		VkBufferCopy meshesCopy = {};
-		meshesCopy.dstOffset = 0;
-		meshesCopy.srcOffset = vertexBufferSize + indexBufferSize + transformBufferSize + materialBufferSize + render_info_size;
-		meshesCopy.size = gpu_mesh_size;
-		vkCmdCopyBuffer(cmd, staging.buffer, mesh_buffer.mesh_buffer.buffer, 1, &meshesCopy);
-	});
-
-	renderer.destroy_buffer(staging);
-
-	return mesh_buffer;
-}
-
 int main() {
     printf("hello vk\n");
 
@@ -193,11 +57,9 @@ int main() {
 		// init textures
 		// init model manager
 
-	// init imgui
-
 	// window
     if (!glfwInit()) {
-        printf("glfw init failed\n");
+        fprintf(stderr, "glfw init failed\n");
         return 1;
     }
 
@@ -218,29 +80,50 @@ int main() {
 	Texture_Manager::init(&renderer);
 	Model_Manager::init("../resources/models/");
 
-	Scene scene;
+	Scene scene(&renderer);
 
-	for (int i = 0; i < 5; i++)
-		scene.create_entity(std::to_string(i));
+	Model_Handle test = Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
+	Model_Handle house = Model_Manager::load_model("house/scene.gltf");
+	//Model_Manager::load_model("factory/scene.gltf");
+	//Model_Manager::load_model("minecraft/scene.gltf");
+	
+	Entity prev;
+	for (int i = 0; i < 5; i++) {
+		Entity e = scene.create_entity(std::to_string(i));
 
-	//Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
-	//Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
-	//Model_Handle house = Model_Manager::load_model("house/scene.gltf");
-	Model_Manager::load_model("factory/scene.gltf");
+		if (prev.is_alive()) {
+			e.add(flecs::ChildOf, prev);
+		}
+		prev = e;
 
-	//Entity e = scene.create_entity();
-	//e.set<Model_Component>({ house });
+		Transform_Component& tc = e.get_mut<Transform_Component>();
+		tc.position.x += 50 * i;
+		tc.dirty = true;
 
-	renderer.geometry_buffer = upload_mesh(Model_Manager::get_indices(), Model_Manager::get_vertices());
+		Model_Handle handle = (i % 2) ? house : test;
 
-	renderer._mainDeletionQueue.push_function([&]() {
-		renderer.destroy_buffer(renderer.geometry_buffer.index_buffer);
-		renderer.destroy_buffer(renderer.geometry_buffer.vertex_buffer);
-		renderer.destroy_buffer(renderer.geometry_buffer.mesh_render_info_buffer);
-		renderer.destroy_buffer(renderer.geometry_buffer.mesh_buffer);
-		renderer.destroy_buffer(renderer.geometry_buffer.transform_buffer);
-		renderer.destroy_buffer(renderer.geometry_buffer.material_buffer);
-	});
+		auto entityName = e.get<Name_Component>().string;
+		auto modelName = Model_Manager::get_model_name(handle);
+		printf("[MAIN] adding entity %s, model %s\n", entityName.c_str(), modelName.c_str());
+
+		e.set<Model_Component>({ handle });
+
+		Light_Component l {
+			.type = Light_Component::Type::Point,
+			.color = vec3(1.0f),
+			.intensity = 10.0f,
+			.range = 100.0f,
+			//.direction
+			.inner_cone_angle = 30.0f,
+			.outer_cone_angle = 45.0f,
+			.dirty = true,
+		};
+
+		e.add<Motion>();
+		e.set<Light_Component>({ l });
+	}
+
+	renderer.upload_geometry(Model_Manager::get_indices(), Model_Manager::get_vertices());
 
 	renderer.init_mesh_cull_descriptors();
 
@@ -321,6 +204,8 @@ int main() {
 			camera.update(xpos, ypos);
 			camera.move(window, dt);
 		}
+
+		scene.update(dt);
 
 		mat4 view = camera.get_view();
 		mat4 projection = camera.get_projection((float)width / (float)height);

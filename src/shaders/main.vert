@@ -3,6 +3,7 @@
 #extension GL_EXT_buffer_reference : require
 #extension GL_GOOGLE_include_directive: require
 
+#include "light.h"
 #include "mesh.h"
 
 layout (location = 0) out vec3 out_color;
@@ -39,14 +40,19 @@ layout(buffer_reference, std430) readonly buffer MaterialBuffer {
 	Material materials[];
 };
 
+layout(buffer_reference, std430) readonly buffer Light_Buffer {
+	Light lights[];
+};
+
 layout(push_constant) uniform constants {
     VertexBuffer vertexBuffer;
     TransformBuffer transformBuffer;
     MaterialBuffer materialBuffer;
-	int padding;
-	int padding2;
+    Light_Buffer lights_buffer;
 	mat4 projection;
 	mat4 view;
+    uint max_lights;
+    uint padding[3];
 } PushConstants;
 
 /*

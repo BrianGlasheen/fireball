@@ -38,23 +38,15 @@ struct AllocatedImage {
 	VkFormat imageFormat;
 };
 
-struct GPU_Mesh_Buffers {
-	Allocated_Buffer vertex_buffer;
-	Allocated_Buffer index_buffer;
-
-	Allocated_Buffer mesh_buffer;
-	Allocated_Buffer mesh_render_info_buffer;
-	Allocated_Buffer transform_buffer;
-	Allocated_Buffer material_buffer;
-};
-
 struct GPU_Push_Constants {
 	Vk_Device_Address vertex_buffer;
 	Vk_Device_Address transform_buffer;
 	Vk_Device_Address material_buffer;
-	int padding[2];
+	Vk_Device_Address light_buffer;
 	mat4 projection;
 	mat4 view;
+	uint32_t max_lights;
+	uint32_t padding[3];
 };
 
 struct Cull_Push_Constants {
