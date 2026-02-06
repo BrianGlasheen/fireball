@@ -84,8 +84,14 @@ int main() {
 
 	Model_Handle test = Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
 	Model_Handle house = Model_Manager::load_model("house/scene.gltf");
+	Model_Handle ciri = Model_Manager::load_model("ciri/scene.gltf");
+	Model_Handle plane = Model_Manager::load_model("plane.obj");
 	//Model_Manager::load_model("factory/scene.gltf");
 	//Model_Manager::load_model("minecraft/scene.gltf");
+
+	Entity e2 = scene.create_entity("plane");
+	e2.get_mut<Transform_Component>().scale = vec3(100.0f);
+	e2.set<Model_Component>({ plane });
 	
 	Entity prev;
 	for (int i = 0; i < 5; i++) {
@@ -94,13 +100,19 @@ int main() {
 		if (prev.is_alive()) {
 			e.add(flecs::ChildOf, prev);
 		}
-		prev = e;
+		//prev = e;
 
 		Transform_Component& tc = e.get_mut<Transform_Component>();
 		tc.position.x += 50 * i;
 		tc.dirty = true;
 
-		Model_Handle handle = (i % 2) ? house : test;
+		Model_Handle handle;
+		if (i == 0)
+			handle = ciri;
+		else if (i == 1)
+			handle = test;
+		else
+			handle = house;
 
 		auto entityName = e.get<Name_Component>().string;
 		auto modelName = Model_Manager::get_model_name(handle);
@@ -108,7 +120,7 @@ int main() {
 
 		e.set<Model_Component>({ handle });
 
-		Light_Component l {
+		Light_Component l{
 			.type = Light_Component::Type::Point,
 			.color = vec3(1.0f),
 			.intensity = 10.0f,
@@ -117,9 +129,10 @@ int main() {
 			.inner_cone_angle = 30.0f,
 			.outer_cone_angle = 45.0f,
 			.dirty = true,
+			.enabled = true
 		};
 
-		e.add<Motion>();
+		//e.add<Motion>();
 		e.set<Light_Component>({ l });
 	}
 
@@ -176,6 +189,7 @@ int main() {
 		//	resize_swapchain(window);
 		//}
 
+		// TODO stuff code in some corner
 		scene.world.query<Light_Component>()
 		.each([&](Entity e, const Light_Component& light) {
 			vec3 pos = vec3(e.get<Transform_Component>().world_transform[3]);
@@ -186,6 +200,22 @@ int main() {
 			renderer.debug_renderer.add_line(
 				pos, pos + vec3(0.0f, 10.0f, 0.0f)
 			);
+		});
+
+		scene.world.query<Model_Component>()
+			.each([&](Entity e, const Model_Component& model) {
+			if (model.handle.animated) {
+				const auto& bones = Model_Manager::get_model_bones(model.handle);
+				mat4 worldTransform = e.get<Transform_Component>().world_transform;
+
+				for (const Bone& b : bones) {
+					mat4 bindPose = glm::inverse(b.inverse_bind);
+					vec3 boneLocalPos = vec3(bindPose[3]);
+					vec3 boneWorldPos = vec3(worldTransform * vec4(boneLocalPos, 1.0f));
+
+					renderer.debug_renderer.add_point(boneWorldPos, vec4(1.0f, 0.0f, 0.0f, 1.0f));
+				}
+			}
 		});
 
 		ImGui_ImplVulkan_NewFrame();
@@ -200,8 +230,6 @@ int main() {
 			ImGui::SliderFloat("Pitch", &camera.pitch, -89.0f, 89.0f);
 			ImGui::SliderFloat("Yaw", &camera.yaw, -180.0f, 180.0f);
 			ImGui::SliderFloat("Zoom", &camera.zoom, -180.0f, 180.0f);
-
-			ImGui::SliderInt("LOD", &lod, 0, NUM_LODS - 1);
 
 			ImGui::End();
 		}

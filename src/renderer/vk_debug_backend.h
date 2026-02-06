@@ -6,6 +6,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include <cassert>
 #include <vector>
 
 using namespace glm;
@@ -312,6 +313,6 @@ private:
             }
         }
 
-        throw std::runtime_error("Failed to find suitable memory type");
+        assert(false && "Failed to find suitable memory type");
     }
 };

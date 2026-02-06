@@ -72,3 +72,24 @@ struct Model {
 	// transform
 	// aabb / bs
 };
+
+struct Animated_Model {
+	Model model;
+	// transform
+	// aabb / bs
+
+	//uint32_t base_animation_vertex;
+	//uint32_t animation_offset;
+
+	int base_bone;
+	int base_animated_bone;
+	uint32_t bone_count;
+
+	uint32_t base_animation;
+	uint32_t animation_count;
+	
+	uint32_t current_animation;
+
+	float animation_time; // local time
+	bool animation_direction; // true forward false back? maybe add loop / bounce flags
+};

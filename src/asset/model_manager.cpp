@@ -1,10 +1,44 @@
-#include "model_manager.h"
+﻿#include "model_manager.h"
 
 #include "texture_manager.h"
 
 #include <assimp/GltfMaterial.h>
 #include <meshoptimizer.h>
 #include <stb_image.h>
+
+struct Animation {
+    std::string name;
+    uint32_t base_bone_animation;
+    uint32_t bone_animation_count;
+    float duration;
+};
+
+struct Bone_Animation {
+    uint32_t bone_index;
+    uint32_t base_position_keyframe;
+    uint32_t position_keyframe_count;
+    uint32_t base_rotation_keyframe;
+    uint32_t rotation_keyframe_count;
+    uint32_t base_scale_keyframe;
+    uint32_t scale_keyframe_count;
+    uint32_t padding;
+};
+
+struct Position_Keyframe {
+    vec3 position;
+    float time;
+};
+
+struct Rotation_Keyframe {
+    quat rotation;
+    float time;
+    uint32_t padding[3];
+};
+
+struct Scale_Keyframe {
+    vec3 scale;
+    float time;
+};
 
 namespace Model_Manager {
     static std::string base_path;
@@ -13,6 +47,16 @@ namespace Model_Manager {
     static std::vector<uint32_t> g_indices(0);
 
     static std::vector<Model> g_models(0);
+    static std::vector<Animated_Model> g_animated_models(0);
+
+    static std::vector<Bone> g_bones(0);
+    // another bone list
+    // vertex with bone info for skinning
+    static std::vector<Animation> g_animations(0);
+    static std::vector<Bone_Animation> bone_animations(0);
+    static std::vector<Position_Keyframe> position_keyframes(0);
+    static std::vector<Rotation_Keyframe> rotation_keyframes(0);
+    static std::vector<Scale_Keyframe> scale_keyframes(0);
 
     mat4 assimp_to_glm(const aiMatrix4x4& ai_mat) {
         return mat4(
@@ -71,17 +115,41 @@ namespace Model_Manager {
 
         process_node(scene->mRootNode, scene, model, path_without_filename, mat4(1.0f), mesh_opt_flags);
 
-        uint32_t actual_meshes = (uint32_t)model.meshes.size();
-        assert(num_meshes == actual_meshes);
-
-        handle.index = g_models.size();
-        g_models.push_back(model);
-
         size_t end_vertices = g_vertices.size();
         size_t end_indices = g_indices.size();
-        
         // todo can add timer
         printf("[Model] Loaded %s: %zu meshes %zu vertices\n", path.c_str(), model.meshes.size(), end_vertices - begin_vertices);
+
+        // if has animations and bones
+        if (scene->HasAnimations()) {
+            Animated_Model animated_model{
+                .model = model,
+                .base_bone = (int)g_bones.size(),
+                //.base_animated_bone = ,
+                // .bone_count = ,
+                .base_animation = (uint32_t)g_animations.size(),
+                // .animation_count = , 
+                .current_animation = 0,
+                .animation_time = 0.0f,
+                .animation_direction = true
+            };
+
+            load_bones(scene);
+
+            animated_model.bone_count = g_bones.size() - animated_model.base_bone;
+            // load animations
+            // set in animated model
+
+            handle.index = g_animated_models.size();
+            handle.animated = true;
+            g_animated_models.push_back(animated_model);
+
+            // can printf bones, animations, etc
+        }
+        else {
+            handle.index = g_models.size();
+            g_models.push_back(model);
+        }
 
         return handle;
     }
@@ -350,6 +418,96 @@ namespace Model_Manager {
         return mesh_material;
     }
 
+    void load_bones(const aiScene* scene) {
+        std::vector<Bone> bones;
+        std::unordered_map<std::string, int> boneMap;
+        std::unordered_map<std::string, glm::mat4> boneOffsets;
+
+        for (unsigned int i = 0; i < scene->mNumMeshes; i++) {
+            aiMesh* mesh = scene->mMeshes[i];
+            for (unsigned int j = 0; j < mesh->mNumBones; j++) {
+                aiBone* bone = mesh->mBones[j];
+                boneOffsets[bone->mName.C_Str()] = assimp_to_glm(bone->mOffsetMatrix);
+            }
+        }
+
+        std::function<void(aiNode*, int, mat4, const std::unordered_map<std::string, glm::mat4>&,
+            std::vector<Bone>&, std::unordered_map<std::string, int>&)> traverseSkeleton =
+            [&](aiNode* node, int parentIdx, mat4 accumulatedTransform,
+                const std::unordered_map<std::string, glm::mat4>& boneOffsets,
+                std::vector<Bone>& bones,
+                std::unordered_map<std::string, int>& boneMap) {
+
+                    mat4 currentTransform = accumulatedTransform * assimp_to_glm(node->mTransformation);
+
+                    if (boneOffsets.find(node->mName.C_Str()) != boneOffsets.end()) {
+                        int currentIdx = bones.size();
+                        boneMap[node->mName.C_Str()] = currentIdx;
+
+                        Bone bone;
+                        bone.name = node->mName.C_Str();
+                        bone.parent = parentIdx;
+                        
+                        bone.inverse_bind = boneOffsets.at(node->mName.C_Str());
+
+                        bones.push_back(bone);
+
+                        parentIdx = currentIdx;
+                    }
+
+                    for (unsigned int i = 0; i < node->mNumChildren; i++) {
+                        traverseSkeleton(node->mChildren[i], parentIdx, currentTransform, boneOffsets, bones, boneMap);
+                    }
+            };
+
+        traverseSkeleton(scene->mRootNode, -1, mat4(1.0f), boneOffsets, bones, boneMap);
+
+        int base = g_bones.size();
+        g_bones.insert(g_bones.end(), bones.begin(), bones.end());
+        int count = g_bones.size() - base;
+
+        print_bone_tree(base, count);
+    }
+
+    void print_bone_tree(int base, int count) {
+        int endIdx = std::min(base + count, (int)g_bones.size());
+
+        std::function<void(int, const std::string&, bool)> printBone = [&](int idx, const std::string& prefix, bool isLast) {
+            const Bone& bone = g_bones[idx];
+
+            printf("%s", prefix.c_str());
+            printf("%s", isLast ? "\\- " : "|-- ");
+            printf("%s [%d]", bone.name.c_str(), idx);
+            printf(" (parent: %d)\n", bone.parent);
+
+            std::string childPrefix = prefix + (isLast ? "    " : "|   ");
+            std::vector<int> children;
+
+            for (int i = base; i < endIdx; i++) {
+                if (g_bones[i].parent == idx) {
+                    children.push_back(i);
+                }
+            }
+
+            for (size_t i = 0; i < children.size(); i++) {
+                bool childIsLast = (i == children.size() - 1);
+                printBone(children[i], childPrefix, childIsLast);
+            }
+        };
+
+        std::vector<int> roots;
+        for (int i = base; i < endIdx; i++) {
+            if (g_bones[i].parent == -1) {
+                roots.push_back(i);
+            }
+        }
+
+        for (size_t i = 0; i < roots.size(); i++) {
+            bool isLast = (i == roots.size() - 1);
+            printBone(roots[i], "", isLast);
+        }
+    }
+
     std::vector<Vertex>& get_vertices() {
         return g_vertices;
     }
@@ -362,8 +520,16 @@ namespace Model_Manager {
         return g_models;
     }
 
+    std::span<const Bone> get_model_bones(Model_Handle handle) {
+        assert(handle.animated);
+
+        Animated_Model& model = g_animated_models[handle.index];
+
+        return std::span<const Bone>(g_bones.begin() + model.base_bone, g_bones.begin() + model.base_bone + model.bone_count);
+    }
+
     Model& get_model(Model_Handle handle) {
-        return g_models[handle.index];
+        return handle.animated ? g_animated_models[handle.index].model : g_models[handle.index];
     };
 
     std::string& get_model_name(Model_Handle handle) {

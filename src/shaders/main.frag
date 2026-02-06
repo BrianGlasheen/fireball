@@ -129,16 +129,7 @@ void main() {
         float falloff = saturate(1.0 - distance / radius);
         attenuation = falloff * falloff;
 
-        if (uint(light.direction_type.w) == 1u) {
-            vec3 spot_dir = normalize(light.direction_type.xyz);
-            float cos_theta = dot(L, -spot_dir);
-
-            float inner = light.params.x;
-            float outer = light.params.y;
-            float spot = saturate((cos_theta - outer) / (inner - outer));
-
-            attenuation *= spot;
-        }
+        // TODO point / spot logic
 
         vec3 radiance = light.color_strength.rgb * light.color_strength.a * attenuation;
 

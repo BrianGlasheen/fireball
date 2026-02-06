@@ -82,7 +82,7 @@ Scene::Scene(Vk_Backend* _renderer) {
                 .position_radius = vec4(vec3(e.get<Transform_Component>().world_transform[3]), light.range),
                 .color_strength = vec4(light.color, light.intensity),
                 .direction_type = vec4(light.direction, light.type == Light_Component::Type::Point ? 0.0f : 1.0f),
-                .params = vec4(light.inner_cone_angle, light.outer_cone_angle, 0, 1)
+                .params = vec4(light.inner_cone_angle, light.outer_cone_angle, 0, light.enabled ? 1.0f : 0.0f)
             };
 
             renderer->update_light(e, l);
@@ -95,11 +95,11 @@ Scene::Scene(Vk_Backend* _renderer) {
     .event(flecs::OnSet)
     .each([this](Entity e, const Light_Component& light) {
         //vec4 params; // inner cone, outer cone, shadow map idx, enabled 
-        GPU_Light l{
+        GPU_Light l {
             .position_radius = vec4(vec3(e.get<Transform_Component>().world_transform[3]), light.range),
             .color_strength = vec4(light.color, light.intensity),
             .direction_type = vec4(light.direction, light.type == Light_Component::Type::Point ? 0.0f : 1.0f),
-            .params = vec4(light.inner_cone_angle, light.outer_cone_angle, 0, 1)
+            .params = vec4(light.inner_cone_angle, light.outer_cone_angle, 0, light.enabled ? 1.0f : 0.0f)
         };
 
         renderer->allocate_light(e, l);

@@ -10,7 +10,7 @@ struct Transform_Component {
 	vec3 rotation = vec3(0.0f);
 	vec3 scale = vec3(1.0f);
 	mat4 world_transform = mat4(1.0f);
-	bool dirty = false;
+	bool dirty = true;
 	bool updated = false;
 };
 
@@ -44,6 +44,7 @@ struct Light_Component {
 	float outer_cone_angle = 45.0f;
 
 	bool dirty = true;
+	bool enabled = true;
 };
 
 struct Lifetime_Component {

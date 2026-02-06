@@ -7,12 +7,13 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
+#include <span>
 #include <string>
 #include <vector>
 
 struct Model_Handle {
     uint32_t index;
-    // animated
+    bool animated;
 };
 
 struct Vertex {
@@ -44,6 +45,12 @@ constexpr Mesh_Opt_Flags Mesh_Opt_Flags_All = {
     .shadow_indexing = 1
 };
 
+struct Bone {
+    std::string name;
+    uint32_t parent;
+    mat4 inverse_bind;
+};
+
 namespace Model_Manager {
     mat4 assimp_to_glm(const aiMatrix4x4& ai_mat);
 
@@ -60,8 +67,8 @@ namespace Model_Manager {
 
     Material load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path);
 
-    //void setup_buffers();
-    //void setup_ssbos();
+    void load_bones(const aiScene* scene);
+    void print_bone_tree(int base, int count);
 
     Model& get_model(Model_Handle handle);
     //Animated_Model& get_animated_model(model_handle handle);
@@ -70,6 +77,7 @@ namespace Model_Manager {
     std::vector<Vertex>& get_vertices();
     std::vector<uint32_t>& get_indices();
     std::vector<Model>& get_models();
+    std::span<const Bone> get_model_bones(Model_Handle handle);
     size_t get_num_vertices();
     size_t get_num_vertices(Model_Handle handle);
     size_t get_num_indices();
