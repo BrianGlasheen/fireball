@@ -5,10 +5,14 @@
 #include <vk_mem_alloc.h>
 #include <vulkan/vk_enum_string_helper.h>
 
+#include <cstdio>
 #include <deque>
 #include <functional>
 #include <span>
-#include <cstdio>
+#include <string>
+#include <vector>
+
+using std::vector, std::string;
 
 #define VK_CHECK(x)																  \
     do {																		  \
@@ -351,4 +355,18 @@ struct DescriptorWriter {
 
 		vkUpdateDescriptorSets(device, (uint32_t)writes.size(), writes.data(), 0, nullptr);
 	}
+};
+
+// template so we can use other type for constructing
+// flat topologically sorted graph where depends_on is an index
+// into flat array
+// template <typename T>
+struct Render_Graph_Node {
+	string name;
+	//vector<T> depends_on;
+	// reads
+	// writes
+	// pass type? render / compute / transfer / present?
+	// pipeline
+	std::function<void(VkCommandBuffer)> execute;
 };

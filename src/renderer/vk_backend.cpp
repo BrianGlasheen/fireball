@@ -29,6 +29,8 @@ int Vk_Backend::init(GLFWwindow* window, uint32_t w, uint32_t h, bool validation
 	init_imgui(window);
 	debug_renderer.init(_device, _chosenGPU, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT);
 
+	init_render_graph();
+
 	return 0;
 }
 
@@ -829,6 +831,102 @@ void Vk_Backend::init_imgui(GLFWwindow* window) {
 	ImGui_ImplVulkan_Init(&init_info);
 }
 
+void Vk_Backend::init_render_graph() {
+	//Render_Graph_Node& rgn = render_graph.emplace_back();
+	//rgn.name = "generate_draw_commands";
+	//rgn.execute = [this](VkCommandBuffer cmd) {
+	//	generate_draw_commands(cmd);
+	//};
+
+	// TODO ideally all resource transitions (if not using unified layout)
+	// are handled automatically by graph, so execute is simply a single function
+	// call where resources are available and in the correct format/
+	// Consuming the graph involves proper barriers then calling execute
+
+	render_graph.push_back(
+		Render_Graph_Node{
+			.name = "generate_draw_commands",
+			.execute = [this](VkCommandBuffer cmd) {
+				generate_draw_commands(cmd);
+			}
+		}
+	);
+
+	render_graph.push_back(
+		Render_Graph_Node{
+			.name = "draw_background",
+			.execute = [this](VkCommandBuffer cmd) {
+				//make the swapchain image into writeable mode before rendering
+				transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+				draw_background(cmd);
+			}
+		}
+	);
+
+	render_graph.push_back(
+		Render_Graph_Node{
+			.name = "draw_geometry",
+			.execute = [this](VkCommandBuffer cmd) {
+				transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+				transition_image(cmd, _depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+				draw_geometry(cmd, frame_proj, frame_view);
+		}
+		}
+	);
+
+	render_graph.push_back(
+		Render_Graph_Node{
+			.name = "draw_debug",
+			.execute = [this](VkCommandBuffer cmd) {
+				debug_renderer.render(cmd, frame_proj * frame_view);
+			}
+		}
+	);
+
+	render_graph.push_back(
+		Render_Graph_Node{
+			.name = "copy_to_swapchain",
+			.execute = [this](VkCommandBuffer cmd) {
+				vkCmdEndRendering(cmd);
+
+				transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+				transition_image(cmd, _swapchainImages[current_swapchain_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+				// execute a copy from the draw image into the swapchain
+				copy_image_to_image(cmd, _drawImage.image, _swapchainImages[current_swapchain_index], _drawExtent, _swapchainExtent);
+			}
+		}
+	);
+
+	render_graph.push_back(
+		Render_Graph_Node{
+			.name = "draw_imgui",
+			.execute = [this](VkCommandBuffer cmd) {
+				VkRenderingAttachmentInfo colorAttachment = {};
+				colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+				colorAttachment.imageView = _swapchainImageViews[current_swapchain_index];
+				colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+				colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // Keep existing content
+				colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+				VkRenderingInfo renderInfo = {};
+				renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+				renderInfo.renderArea.offset = { 0, 0 };
+				renderInfo.renderArea.extent = _swapchainExtent;
+				renderInfo.layerCount = 1;
+				renderInfo.colorAttachmentCount = 1;
+				renderInfo.pColorAttachments = &colorAttachment;
+
+				vkCmdBeginRendering(cmd, &renderInfo);
+				ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+				vkCmdEndRendering(cmd);
+			}
+		}
+	);
+}
+
 void Vk_Backend::upload_geometry(std::span<uint32_t> indices, std::span<Vertex> vertices) {
 	size_t vertexBufferSize = vertices.size() * sizeof(Vertex);
 	size_t indexBufferSize = indices.size() * sizeof(uint32_t);
@@ -913,7 +1011,7 @@ void Vk_Backend::allocate_model(Entity e, Model_Handle handle) {
 		material.albedo = mesh.material.albedo;
 		material.normal = mesh.material.normal;
 		material.alpha_cutoff = mesh.material.alpha_cutoff;
-		material.blending = mesh.material.blend ? 1 : 0; // rm me
+		material.blending = mesh.material.blend ? 1 : 0; // TODO rm me
 		materials.push_back(material);
 
 		GPU_Mesh_Render_Info render_info;
@@ -1189,8 +1287,11 @@ void Vk_Backend::cleanup() {
 }
 
 void Vk_Backend::render(const mat4& projection, const mat4& view) {
+	frame_proj = projection; // TODO hack rm
+	frame_view = view;
+
 	// wait until the gpu has finished rendering the last frame. Timeout of 1
-// second
+	// second
 	VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
 
 	get_current_frame()._deletionQueue.flush();
@@ -1208,6 +1309,8 @@ void Vk_Backend::render(const mat4& projection, const mat4& view) {
 		// trigger resize
 	}
 
+	current_swapchain_index = swapchainImageIndex; // todo consolidate
+
 	VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
 	// now that we are sure that the commands finished executing, we can safely
 	// reset the command buffer to begin recording again.
@@ -1222,44 +1325,10 @@ void Vk_Backend::render(const mat4& projection, const mat4& view) {
 
 	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
-	generate_draw_commands(cmd);
 
-	//make the swapchain image into writeable mode before rendering
-	transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+	for (const Render_Graph_Node& rgn : render_graph)
+		rgn.execute(cmd);
 
-	draw_background(cmd);
-
-	transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-	transition_image(cmd, _depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-
-	draw_geometry(cmd, projection, view);
-
-	debug_renderer.render(cmd, projection * view);
-
-	transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-	transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-
-	// execute a copy from the draw image into the swapchain
-	copy_image_to_image(cmd, _drawImage.image, _swapchainImages[swapchainImageIndex], _drawExtent, _swapchainExtent);
-
-	VkRenderingAttachmentInfo colorAttachment = {};
-	colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-	colorAttachment.imageView = _swapchainImageViews[swapchainImageIndex];
-	colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // Keep existing content
-	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-
-	VkRenderingInfo renderInfo = {};
-	renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-	renderInfo.renderArea.offset = { 0, 0 };
-	renderInfo.renderArea.extent = _swapchainExtent;
-	renderInfo.layerCount = 1;
-	renderInfo.colorAttachmentCount = 1;
-	renderInfo.pColorAttachments = &colorAttachment;
-
-	vkCmdBeginRendering(cmd, &renderInfo);
-	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
-	vkCmdEndRendering(cmd);
 
 	// set swapchain image layout to Present so we can show it on the screen
 	transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
@@ -1318,10 +1387,7 @@ void Vk_Backend::generate_draw_commands(VkCommandBuffer cmd) {
 	resetBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 	resetBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
 
-	vkCmdPipelineBarrier(cmd,
-		VK_PIPELINE_STAGE_TRANSFER_BIT,
-		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		0, 1, &resetBarrier, 0, nullptr, 0, nullptr);
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &resetBarrier, 0, nullptr, 0, nullptr);
 
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, mesh_cull_pipeline);
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, mesh_cull_pipeline_layout, 0, 1, &mesh_cull_descriptor_set, 0, nullptr);
@@ -1340,10 +1406,7 @@ void Vk_Backend::generate_draw_commands(VkCommandBuffer cmd) {
 	VkMemoryBarrier barrier{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
 	barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 	barrier.dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-	vkCmdPipelineBarrier(cmd,
-		VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT,
-		0, 1, &barrier, 0, nullptr, 0, nullptr);
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
 void Vk_Backend::draw_background(VkCommandBuffer cmd) {
@@ -1401,15 +1464,6 @@ void Vk_Backend::draw_geometry(VkCommandBuffer cmd, const mat4& projection, cons
 
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, opaque_pipeline);
 
-	//VkDescriptorSet imageSet = get_current_frame()._frameDescriptors.allocate(_device, _singleImageDescriptorLayout);
-	//{
-	//	DescriptorWriter writer;
-	//	//writer.write_image(0, _errorCheckerboardImage.imageView, _defaultSamplerNearest, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-
-	//	//writer.update_set(_device, imageSet);
-	//}
-
-	////vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, _opaquePipelineLayout, 0, 1, &imageSet, 0, nullptr);
 	VkDescriptorSet _bindlessDescriptorSet = Texture_Manager::get_bindless_descriptor_set();
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw_pipeline_layout,
 		0, 1, &_bindlessDescriptorSet, 0, nullptr);
@@ -1422,22 +1476,12 @@ void Vk_Backend::draw_geometry(VkCommandBuffer cmd, const mat4& projection, cons
 	vkCmdBindIndexBuffer(cmd, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
 
 	// draw
-	vkCmdDrawIndexedIndirectCount(cmd,
-		opaque_command_buffer.buffer, 0,
-		command_count_buffer.buffer, offsetof(Command_Counts, opaque),
-		MAX_DRAW_COMMANDS,
-		sizeof(VkDrawIndexedIndirectCommand));
+	vkCmdDrawIndexedIndirectCount(cmd, opaque_command_buffer.buffer, 0, command_count_buffer.buffer, offsetof(Command_Counts, opaque), MAX_DRAW_COMMANDS, sizeof(VkDrawIndexedIndirectCommand));
 
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, transparent_pipeline);
 
 	// draw
-	vkCmdDrawIndexedIndirectCount(cmd,
-		transparent_command_buffer.buffer, 0,
-		command_count_buffer.buffer, offsetof(Command_Counts, transparent),
-		MAX_DRAW_COMMANDS,
-		sizeof(VkDrawIndexedIndirectCommand));
-
-	vkCmdEndRendering(cmd);
+	vkCmdDrawIndexedIndirectCount(cmd, transparent_command_buffer.buffer, 0, command_count_buffer.buffer, offsetof(Command_Counts, transparent), MAX_DRAW_COMMANDS, sizeof(VkDrawIndexedIndirectCommand));
 }
 
 Allocated_Buffer Vk_Backend::create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) {

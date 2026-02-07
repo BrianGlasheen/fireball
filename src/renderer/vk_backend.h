@@ -83,7 +83,7 @@ public:
 	//Allocated_Buffer csm_command_buffer; multiple of these?
 	Allocated_Buffer command_count_buffer;
 
-	Allocated_Buffer light_buffer;
+	Allocated_Buffer light_buffer; // TODO per fif
 	uint32_t num_lights;
 	std::vector<uint32_t> light_free_list;
 	std::unordered_map<ecs_entity_t, uint32_t> light_allocations;
@@ -100,12 +100,15 @@ public:
 	std::unordered_map<ecs_entity_t, Range_Allocation> mesh_allocations;
 	Allocated_Buffer mesh_buffer;
 	Allocated_Buffer mesh_render_info_buffer;
-	Allocated_Buffer transform_buffer;
+	Allocated_Buffer transform_buffer; // TODO per fif
 	Allocated_Buffer material_buffer;
 
-	uint32_t total_mesh_count;
-
 	Vk_Debug_Backend debug_renderer;
+
+	vector<Render_Graph_Node> render_graph;
+	mat4 frame_proj; // TODO HACK
+	mat4 frame_view; // TODO RM
+	uint32_t current_swapchain_index; // same
 
 	int init(GLFWwindow* window, uint32_t width, uint32_t height, bool validation_layers);
 	int init_vulkan(GLFWwindow* window, bool validation_layers);
@@ -130,6 +133,8 @@ public:
 	void init_pipelines();
 	
 	void init_imgui(GLFWwindow* window);
+
+	void init_render_graph();
 
 	void upload_geometry(std::span<uint32_t> indices, std::span<Vertex> vertices);
 	void allocate_model(Entity e, Model_Handle handle);
