@@ -6,6 +6,16 @@
 #include <meshoptimizer.h>
 #include <stb_image.h>
 
+#include <chrono>
+#include <mutex>
+#include <thread>
+
+using std::chrono::system_clock, std::chrono::time_point,std::chrono::milliseconds, std::chrono::duration_cast;
+using std::mutex;
+using std::thread;
+
+typedef time_point<system_clock> Time;
+
 struct Animation {
     std::string name;
     uint32_t base_bone_animation;
@@ -58,6 +68,10 @@ namespace Model_Manager {
     static std::vector<Rotation_Keyframe> rotation_keyframes(0);
     static std::vector<Scale_Keyframe> scale_keyframes(0);
 
+    static mutex model_mutex;
+    static mutex data_mutex;
+    static vector<thread> loading_threads;
+
     mat4 assimp_to_glm(const aiMatrix4x4& ai_mat) {
         return mat4(
             ai_mat.a1, ai_mat.b1, ai_mat.c1, ai_mat.d1,
@@ -76,6 +90,7 @@ namespace Model_Manager {
     }
 
     bool model_loaded(const std::string& full_path, Model_Handle& handle) {
+        // TODO check handle for animated and search accordingly
         for (size_t i = 0; i < g_models.size(); i++) {
             if (full_path == g_models[i].name) {
                 handle.index = i;
@@ -88,125 +103,122 @@ namespace Model_Manager {
     Model_Handle load_model(const std::string& path, const Mesh_Opt_Flags mesh_opt_flags, bool append_base_path) {
         const std::string full_path = append_base_path ? base_path + path : path;
 
-        printf("[Model] Attempting to load %s\n", full_path.c_str());
+        model_mutex.lock();
+            printf("[Model] Attempting to load %s\n", full_path.c_str());
+            
+            Model_Handle handle = {};
+            if (model_loaded(path, handle)) {
+                model_mutex.unlock();
+                return handle;
+            }
 
-        size_t begin_vertices = g_vertices.size();
-        size_t begin_indices = g_indices.size();
+            handle.index = g_models.size();
+            Model model;
+            model.name = path;
+            model.state = Loading_State::Loading;
+            
+            g_models.push_back(model);
+        model_mutex.unlock();
 
-        Model_Handle handle = {};
-        if (model_loaded(path, handle))
-            return handle;
+        loading_threads.emplace_back(load_model_async, full_path, handle, mesh_opt_flags);
+
+        return handle;
+    }
+
+    void load_model_async(const std::string& path, Model_Handle handle, const Mesh_Opt_Flags mesh_opt_flags) {
+        Time start_time = system_clock::now();
 
         Assimp::Importer import;
-        const aiScene* scene = import.ReadFile(full_path, aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals | aiProcess_ValidateDataStructure | aiProcess_PopulateArmatureData);
+        const aiScene* scene = import.ReadFile(path, aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals | aiProcess_ValidateDataStructure | aiProcess_PopulateArmatureData);
 
         if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode) {
             fprintf(stderr, "[Model] Assimp error: %s\n", import.GetErrorString());
             assert(false);
         }
 
-        const std::string path_without_filename = full_path.substr(0, full_path.find_last_of("/") + 1);
-
-        Model model;
-        model.name = path;
+        const std::string path_without_filename = path.substr(0, path.find_last_of("/") + 1);
 
         uint32_t num_meshes = scene->mNumMeshes;
-        model.meshes.reserve(scene->mNumMeshes);
+        vector<Mesh> meshes(num_meshes);
 
-        process_node(scene->mRootNode, scene, model, path_without_filename, mat4(1.0f), mesh_opt_flags);
+        vector<Vertex> vertex_buffer; // todo could pre reserve total verts, meh
+        vector<uint32_t> index_buffer;
 
-        size_t end_vertices = g_vertices.size();
-        size_t end_indices = g_indices.size();
-        // todo can add timer
-        printf("[Model] Loaded %s: %zu meshes %zu vertices\n", path.c_str(), model.meshes.size(), end_vertices - begin_vertices);
+        process_node(scene->mRootNode, scene, vertex_buffer, index_buffer, meshes, path_without_filename, mat4(1.0f), mesh_opt_flags);
+        // todo write binary format
 
-        // if has animations and bones
-        if (scene->HasAnimations()) {
-            Animated_Model animated_model{
-                .model = model,
-                .base_bone = (int)g_bones.size(),
-                //.base_animated_bone = ,
-                // .bone_count = ,
-                .base_animation = (uint32_t)g_animations.size(),
-                // .animation_count = , 
-                .current_animation = 0,
-                .animation_time = 0.0f,
-                .animation_direction = true
-            };
-
-            load_bones(scene);
-
-            animated_model.bone_count = g_bones.size() - animated_model.base_bone;
-            // load animations
-            // set in animated model
-
-            handle.index = g_animated_models.size();
-            handle.animated = true;
-            g_animated_models.push_back(animated_model);
-
-            // can printf bones, animations, etc
-        }
-        else {
-            handle.index = g_models.size();
-            g_models.push_back(model);
-        }
-
-        return handle;
-    }
-
-    void process_node(aiNode* node, const aiScene* scene, Model& model, const std::string& path, const mat4& parent_transform, const Mesh_Opt_Flags mesh_opt_flags) {
-        mat4 current_transform = parent_transform * assimp_to_glm(node->mTransformation);
-
-        for (uint32_t i = 0; i < node->mNumMeshes; i++) {
+        data_mutex.lock();
             size_t begin_vertices = g_vertices.size();
             size_t begin_indices = g_indices.size();
 
+            g_vertices.reserve(g_vertices.size() + vertex_buffer.size());
+            g_indices.reserve(g_indices.size() + index_buffer.size());
+
+            g_vertices.insert(g_vertices.end(), vertex_buffer.begin(), vertex_buffer.end());
+            g_indices.insert(g_indices.end(), index_buffer.begin(), index_buffer.end());
+        data_mutex.unlock();
+
+        // update meshes with each base vertex / index
+        for (Mesh& mesh : meshes) {
+            mesh.base_vertex += (uint32_t)begin_vertices;
+
+            for (Lod& lod : mesh.lods)
+                lod.base_index += (uint32_t)begin_indices;
+        }
+
+        model_mutex.lock();
+            g_models[handle.index].meshes = meshes;
+            g_models[handle.index].state = Loading_State::Loaded;
+        model_mutex.unlock();
+
+        double elapsed = duration_cast<milliseconds>(system_clock::now() - start_time).count();
+
+        printf("[Model] Loaded %s: %zu meshes %zu vertices (%.2f MB) %zu indices (%.2f MB) in %.1f Ms\n", path.c_str(), meshes.size(), vertex_buffer.size(), (vertex_buffer.size() * sizeof(Vertex)) * 1e-6, index_buffer.size(), (index_buffer.size() * sizeof(uint32_t)) * 1e-6, elapsed);
+    }
+
+    void process_node(aiNode* node, const aiScene* scene, vector<Vertex>& vertex_buffer, vector<uint32_t>& index_buffer, vector<Mesh>& meshes, const std::string& path, const mat4& parent_transform, const Mesh_Opt_Flags mesh_opt_flags) {
+        mat4 current_transform = parent_transform * assimp_to_glm(node->mTransformation);
+
+        for (uint32_t i = 0; i < node->mNumMeshes; i++) {
             aiMesh* ai_mesh = scene->mMeshes[node->mMeshes[i]];
+
+            size_t current_vertices = vertex_buffer.size();
+            // size_t current_indices = index_buffer.size();
 
             uint32_t vertex_count = (uint32_t)ai_mesh->mNumVertices;
             uint32_t index_count = (uint32_t)ai_mesh->mNumFaces * 3;
 
-            std::vector<Vertex> vertex_buffer(vertex_count);
-            std::vector<uint32_t> index_buffer(index_count);
-            process_mesh(ai_mesh, vertex_buffer, index_buffer);
+            vector<Vertex> local_vertex_buffer(vertex_count);
+            vector<uint32_t> local_index_buffer(index_count);
 
-            optimize_mesh(vertex_buffer, index_buffer, mesh_opt_flags);
+            process_mesh(ai_mesh, local_vertex_buffer, local_index_buffer);
+            optimize_mesh(local_vertex_buffer, local_index_buffer, mesh_opt_flags);
+
+            vertex_buffer.reserve(current_vertices + vertex_count);
+            vertex_buffer.insert(vertex_buffer.end(), local_vertex_buffer.begin(), local_vertex_buffer.end());
 
             Mesh mesh = {};
             mesh.name = ai_mesh->mName.C_Str();
             mesh.transform = current_transform;
-            mesh.base_vertex = (uint32_t)g_vertices.size();
-            mesh.vertex_count = (uint32_t)vertex_buffer.size();
+            mesh.base_vertex = (uint32_t)current_vertices;
+            mesh.vertex_count = (uint32_t)vertex_count;
             mesh.material = load_material(ai_mesh, scene, path);
 
-            g_vertices.insert(g_vertices.end(), vertex_buffer.begin(), vertex_buffer.end());
-
             for (uint32_t lod = 0; lod < NUM_LODS; lod++) {
-                printf("lod %d\n", lod);
                 std::vector<uint32_t> lod_indices = (lod == 0) ? 
-                    index_buffer : generate_lod(vertex_buffer, index_buffer, LOD_THRESHOLDS[lod]);
+                    local_index_buffer : generate_lod(local_vertex_buffer, local_index_buffer, LOD_THRESHOLDS[lod]);
 
-                mesh.lods[lod].base_index = (uint32_t)g_indices.size();
+                mesh.lods[lod].base_index = (uint32_t)index_buffer.size();
                 mesh.lods[lod].index_count = (uint32_t)lod_indices.size();
 
-                g_indices.insert(g_indices.end(), lod_indices.begin(), lod_indices.end());
+                index_buffer.insert(index_buffer.end(), lod_indices.begin(), lod_indices.end());
             }
 
-            model.meshes.push_back(mesh);
-
-            size_t end_vertices = g_vertices.size();
-            size_t end_indices = g_indices.size();
-            
-            printf("[Model] Loaded mesh %s\n", mesh.name.c_str());
-            printf("[Model] %zu vertices\n", end_vertices - begin_vertices);
-            for (uint32_t lod = 0; lod < NUM_LODS; lod++) {
-                printf("[Model] LOD%d: %u indices (%.1f%%)\n", lod, mesh.lods[lod].index_count, LOD_THRESHOLDS[lod] * 100.0f);
-            }
-            // timer
+            meshes.push_back(mesh);
         }
 
         for (uint32_t i = 0; i < node->mNumChildren; i++) {
-            process_node(node->mChildren[i], scene, model, path, current_transform, mesh_opt_flags);
+            process_node(node->mChildren[i], scene, vertex_buffer, index_buffer, meshes, path, current_transform, mesh_opt_flags);
         }
     }
 
@@ -265,6 +277,11 @@ namespace Model_Manager {
             const aiFace& face = ai_mesh->mFaces[i];
             memcpy(&index_buffer[index], face.mIndices, 3 * sizeof(uint32_t));
             index += 3;
+
+            //assert(face.mNumIndices == 3);
+            //index_buffer.push_back(face.mIndices[0]);
+            //index_buffer.push_back(face.mIndices[1]);
+            //index_buffer.push_back(face.mIndices[2]);
         }
     }
 
@@ -299,7 +316,7 @@ namespace Model_Manager {
             );
             vertex_buffer = std::move(optimized_vertices);
 
-            printf("[Optimize] Index optimization: %zu -> %zu vertices\n", remap.size(), unique_vertices);
+            //printf("[Optimize] Index optimization: %zu -> %zu vertices\n", remap.size(), unique_vertices);
         }
 
         if (flags.vertex_cache) {
@@ -309,7 +326,7 @@ namespace Model_Manager {
                 index_buffer.size(),
                 vertex_buffer.size()
             );
-            printf("[Optimize] Vertex cache optimization applied\n");
+            //printf("[Optimize] Vertex cache optimization applied\n");
         }
 
         if (flags.overdraw) {
@@ -322,7 +339,7 @@ namespace Model_Manager {
                 sizeof(Vertex),
                 1.05f
             );
-            printf("[Optimize] Overdraw optimization applied\n");
+            //printf("[Optimize] Overdraw optimization applied\n");
         }
 
         if (flags.vertex_fetch) {
@@ -336,7 +353,7 @@ namespace Model_Manager {
                 sizeof(Vertex)
             );
             vertex_buffer = std::move(optimized_vertices);
-            printf("[Optimize] Vertex fetch optimization applied\n");
+            //printf("[Optimize] Vertex fetch optimization applied\n");
         }
 
         if (flags.vertex_quantization) {
@@ -376,23 +393,23 @@ namespace Model_Manager {
         aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
 
         if (mesh->mMaterialIndex >= 0) {
-            if (material->GetTextureCount(aiTextureType_BASE_COLOR)) {
-                aiString str;
-                material->GetTexture(aiTextureType_BASE_COLOR, 0, &str);
-                mesh_material.albedo = Texture_Manager::load(path + str.C_Str());
-            }
-            else {
+        //    if (material->GetTextureCount(aiTextureType_BASE_COLOR)) {
+        //        aiString str;
+        //        material->GetTexture(aiTextureType_BASE_COLOR, 0, &str);
+        //        mesh_material.albedo = Texture_Manager::load(path + str.C_Str());
+        //    }
+        //    else {
                 mesh_material.albedo = Texture_Manager::get_by_name("error").bindless_id;
-            }
+            //}
 
-            if (material->GetTextureCount(aiTextureType_NORMALS)) {
-                aiString str;
-                material->GetTexture(aiTextureType_NORMALS, 0, &str);
-                mesh_material.normal = Texture_Manager::load(path + str.C_Str());
-            }
-            else {
+            //if (material->GetTextureCount(aiTextureType_NORMALS)) {
+            //    aiString str;
+            //    material->GetTexture(aiTextureType_NORMALS, 0, &str);
+            //    mesh_material.normal = Texture_Manager::load(path + str.C_Str());
+            //}
+            //else {
                 mesh_material.normal = Texture_Manager::get_by_name("normal").bindless_id;
-            }
+            //}
         }
 
         float alpha_cutoff = 0.5f;
@@ -506,6 +523,16 @@ namespace Model_Manager {
             bool isLast = (i == roots.size() - 1);
             printBone(roots[i], "", isLast);
         }
+    }
+
+    void wait_for_all_loads() {
+        for (thread& load : loading_threads)
+            load.join();
+
+        loading_threads.clear();
+
+        for (const Model& model : g_models)
+            assert(model.state == Loading_State::Loaded);
     }
 
     std::vector<Vertex>& get_vertices() {

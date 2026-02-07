@@ -45,6 +45,7 @@ int Vk_Backend::init_vulkan(GLFWwindow* window, bool validation_layers) {
 	}
 
 	builder.enable_extension(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	//builder.enable_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME); explodes
 
 	//make the vulkan instance, with basic debug features
 	auto inst_ret = builder.set_app_name("fireball")
@@ -67,6 +68,7 @@ int Vk_Backend::init_vulkan(GLFWwindow* window, bool validation_layers) {
 	}
 
 	// 1.4
+	// !?
 
 	VkPhysicalDeviceVulkan13Features features13{ .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
 	features13.dynamicRendering = true;

@@ -88,6 +88,7 @@ int main() {
 	Model_Handle plane = Model_Manager::load_model("plane.obj");
 	//Model_Manager::load_model("factory/scene.gltf");
 	//Model_Manager::load_model("minecraft/scene.gltf");
+	Model_Manager::wait_for_all_loads();
 
 	Entity e2 = scene.create_entity("plane");
 	e2.get_mut<Transform_Component>().scale = vec3(100.0f);

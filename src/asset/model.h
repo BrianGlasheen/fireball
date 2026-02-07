@@ -66,17 +66,25 @@ struct alignas(16) GPU_Mesh {
 	vec4 bounding_sphere;
 };
 
+enum class Loading_State {
+	Loading,
+	Loaded,
+	Error,
+	// Requested
+};
+
 struct Model {
 	std::string name;
 	std::vector<Mesh> meshes;
+	Loading_State state;
 	// transform
 	// aabb / bs
 };
 
 struct Animated_Model {
 	Model model;
-	// transform
-	// aabb / bs
+
+	// TODO decide split or one?
 
 	//uint32_t base_animation_vertex;
 	//uint32_t animation_offset;

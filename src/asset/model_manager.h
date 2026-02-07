@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+using std::vector;
+
 struct Model_Handle {
     uint32_t index;
     bool animated;
@@ -58,25 +60,29 @@ namespace Model_Manager {
     void cleanup();
 
     bool model_loaded(const std::string& full_path, Model_Handle& model_index);
+    
     Model_Handle load_model(const std::string& path, const Mesh_Opt_Flags mesh_opt_flags = {}, bool append_base_path = true);
+    void load_model_async(const std::string& path, Model_Handle handle, const Mesh_Opt_Flags mesh_opt_flags);
 
-    void process_node(aiNode* node, const aiScene* scene, Model& model, const std::string& path, const mat4& parent_transform, const Mesh_Opt_Flags mesh_opt_flags);
-    void process_mesh(const aiMesh* ai_mesh,  std::vector<Vertex>& vertex_buffer, std::vector<uint32_t>& index_buffer);
-    void optimize_mesh(std::vector<Vertex>& vertex_buffer, std::vector<uint32_t>& index_buffer, const Mesh_Opt_Flags flags);
-    std::vector<uint32_t> generate_lod(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices, float threshold);
+    void process_node(aiNode* node, const aiScene* scene, vector<Vertex>& vertex_buffer, vector<uint32_t>& index_buffer, vector<Mesh>& meshes, const std::string& path, const mat4& parent_transform, const Mesh_Opt_Flags mesh_opt_flags);
+    void process_mesh(const aiMesh* ai_mesh, vector<Vertex>& vertex_buffer, vector<uint32_t>& index_buffer);
+    void optimize_mesh(vector<Vertex>& vertex_buffer, vector<uint32_t>& index_buffer, const Mesh_Opt_Flags flags);
+    vector<uint32_t> generate_lod(const vector<Vertex>& vertices, const vector<uint32_t>& indices, float threshold);
 
     Material load_material(const aiMesh* mesh, const aiScene* scene, const std::string& path);
 
     void load_bones(const aiScene* scene);
     void print_bone_tree(int base, int count);
 
+    void wait_for_all_loads();
+
     Model& get_model(Model_Handle handle);
     //Animated_Model& get_animated_model(model_handle handle);
     std::string& get_model_name(Model_Handle handle);
 
-    std::vector<Vertex>& get_vertices();
-    std::vector<uint32_t>& get_indices();
-    std::vector<Model>& get_models();
+    vector<Vertex>& get_vertices();
+    vector<uint32_t>& get_indices();
+    vector<Model>& get_models();
     std::span<const Bone> get_model_bones(Model_Handle handle);
     size_t get_num_vertices();
     size_t get_num_vertices(Model_Handle handle);

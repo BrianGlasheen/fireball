@@ -137,6 +137,7 @@ namespace Texture_Manager {
 
 		stbi_image_free(data);
 
+		// TODO make thread safe
 		uint32_t bindless_id = add_bindless_texture(image);
 
 		auto [insertIt, inserted] = textures.try_emplace(file_path);
