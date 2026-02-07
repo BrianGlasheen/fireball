@@ -393,23 +393,23 @@ namespace Model_Manager {
         aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
 
         if (mesh->mMaterialIndex >= 0) {
-        //    if (material->GetTextureCount(aiTextureType_BASE_COLOR)) {
-        //        aiString str;
-        //        material->GetTexture(aiTextureType_BASE_COLOR, 0, &str);
-        //        mesh_material.albedo = Texture_Manager::load(path + str.C_Str());
-        //    }
-        //    else {
+            if (material->GetTextureCount(aiTextureType_BASE_COLOR)) {
+                aiString str;
+                material->GetTexture(aiTextureType_BASE_COLOR, 0, &str);
+                mesh_material.albedo = Texture_Manager::load(path + str.C_Str());
+            }
+            else {
                 mesh_material.albedo = Texture_Manager::get_by_name("error").bindless_id;
-            //}
+            }
 
-            //if (material->GetTextureCount(aiTextureType_NORMALS)) {
-            //    aiString str;
-            //    material->GetTexture(aiTextureType_NORMALS, 0, &str);
-            //    mesh_material.normal = Texture_Manager::load(path + str.C_Str());
-            //}
-            //else {
+            if (material->GetTextureCount(aiTextureType_NORMALS)) {
+                aiString str;
+                material->GetTexture(aiTextureType_NORMALS, 0, &str);
+                mesh_material.normal = Texture_Manager::load(path + str.C_Str());
+            }
+            else {
                 mesh_material.normal = Texture_Manager::get_by_name("normal").bindless_id;
-            //}
+            }
         }
 
         float alpha_cutoff = 0.5f;

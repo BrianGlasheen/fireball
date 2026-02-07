@@ -8,9 +8,17 @@
 #include <cstdint>
 #include <map>
 
+enum class Texture_Loading_State {
+    Loading,
+    Loaded,
+    Error,
+    // Requested
+};
+
 struct Texture {
     AllocatedImage allocated_image;
     uint32_t bindless_id;
+    Texture_Loading_State loading_state;
 };
 
 // hm
@@ -24,14 +32,18 @@ namespace Texture_Manager {
     void cleanup();
 
     uint32_t load(const std::string& file_path);
+    void load_async(const std::string& file_path, uint32_t bindless_id);
 
 	AllocatedImage create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
 	AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
     uint32_t add_bindless_texture(const AllocatedImage& image);
+    void add_bindless_texture(const AllocatedImage& image, uint32_t texture_index);
 
     void free_texture(const std::string& str);
     //void free_texture(const Texture_Handle& handle);
     void destroy_image(const AllocatedImage& img);
+
+    void wait_for_all_loads();
 
     const Texture& get_by_name(const std::string& str);
 

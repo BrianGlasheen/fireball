@@ -70,7 +70,8 @@ int main() {
 	glfwSetMouseButtonCallback(window, mouseCallback);
 	glfwSetKeyCallback(window, keyCallback);
 	glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-	//
+	//	static std::vector<AllocatedImage> _bindlessTextures;
+
 
 	if (renderer.init(window, width, height, validation_layers)) {
 		fprintf(stderr, "Renderer failed to initialize\n");
@@ -85,10 +86,12 @@ int main() {
 	Model_Handle test = Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
 	Model_Handle house = Model_Manager::load_model("house/scene.gltf");
 	Model_Handle ciri = Model_Manager::load_model("ciri/scene.gltf");
+	// Model_Handle ciri = Model_Manager::load_model("bistro/bistro.gltf");
 	Model_Handle plane = Model_Manager::load_model("plane.obj");
 	//Model_Manager::load_model("factory/scene.gltf");
 	//Model_Manager::load_model("minecraft/scene.gltf");
 	Model_Manager::wait_for_all_loads();
+	Texture_Manager::wait_for_all_loads();
 
 	Entity e2 = scene.create_entity("plane");
 	e2.get_mut<Transform_Component>().scale = vec3(100.0f);

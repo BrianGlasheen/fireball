@@ -10,6 +10,11 @@
 #include <array>
 #include <cmath>
 #include <map>
+#include <mutex>
+#include <thread>
+
+using std::mutex;
+using std::thread;
 
 #define VK_CHECK(x)																  \
     do {																		  \
@@ -32,15 +37,23 @@ namespace Texture_Manager {
 
 	static std::map<std::string, Texture> textures;
 
-	// hm
+	// this should NOT own this... lol
 	static VkDescriptorSetLayout _bindlessDescriptorLayout;
 	static VkDescriptorSet _bindlessDescriptorSet;
-	static std::vector<AllocatedImage> _bindlessTextures;
+	// this should NOT own this... lol
+
 	static uint32_t _nextBindlessTextureIndex = 0;
 
 	// put in array or something
 	static VkSampler _defaultSamplerLinear;
 	static VkSampler _defaultSamplerNearest;
+
+	static mutex texture_mutex;
+	static mutex deque_mutex;
+	static mutex vma_mutex;
+	static mutex immediate_mutex;
+	static mutex device_mutex;
+	static vector<thread> loading_threads;
 
     void init(Vk_Backend* _renderer) {
 		renderer = _renderer;
@@ -74,11 +87,13 @@ namespace Texture_Manager {
 		Texture& black_texture = textures["black"];
 		black_texture.allocated_image = create_image((void*)&black, VkExtent3D{ 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
 		black_texture.bindless_id = add_bindless_texture(black_texture.allocated_image);
+		black_texture.loading_state = Texture_Loading_State::Loaded;
 
 		Texture& normal_texture = textures["normal"];
 		normal_texture.allocated_image = create_image((void*)&normal, VkExtent3D{ 1, 1, 1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
 		normal_texture.bindless_id = add_bindless_texture(normal_texture.allocated_image);
-		
+		normal_texture.loading_state = Texture_Loading_State::Loaded;
+
 		//checkerboard image
 		std::array<uint32_t, 16 * 16 > pixels; //for 16x16 checkerboard texture
 		for (int x = 0; x < 16; x++) {
@@ -90,6 +105,7 @@ namespace Texture_Manager {
 		Texture& error_texture = textures["error"];
 		error_texture.allocated_image = create_image(pixels.data(), VkExtent3D{ 16, 16, 1 }, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT);
 		error_texture.bindless_id = add_bindless_texture(error_texture.allocated_image);
+		error_texture.loading_state = Texture_Loading_State::Loaded;
 
 		deq.push_function([=]() {
 			vkDestroySampler(device, _defaultSamplerNearest, nullptr);
@@ -107,15 +123,43 @@ namespace Texture_Manager {
 
 	//bool loaded_already(const std::string& new_path, Texture_Handle& handle);
 	
+	// TODO probably change so this returns handle to texture instead of just
+	// the bindless id, at some point
 	uint32_t load(const std::string& file_path) {
-		auto it = textures.find(file_path);
-		if (it != textures.end()) {
-			printf("[TEXTURE] Already loaded: %s\n", file_path.c_str());
-			return it->second.bindless_id;
+		texture_mutex.lock();
+			auto it = textures.find(file_path);
+			if (it != textures.end()) {
+				// printf("[TEXTURE] Already loaded: %s\n", file_path.c_str());
+				texture_mutex.unlock();
+
+				return it->second.bindless_id;
+			}
+			
+			auto [insertIt, inserted] = textures.try_emplace(file_path);
+			insertIt->second.loading_state = Texture_Loading_State::Loading;
+		texture_mutex.unlock();
+
+		// atomic load, maybe not?
+		if (_nextBindlessTextureIndex > MAX_BINDLESS_TEXTURES) {
+			fprintf(stderr, "Bindless texture limit reached!\n");
+			assert(false);
 		}
 
+		uint32_t bindless_id = _nextBindlessTextureIndex++; // TODO atomic add? maybe not!
+
+		// TODO should really get a handle
+		// add resource, set state to loading
+		// start load for resources handle points at
+		// return handle
+
+		loading_threads.emplace_back(load_async, file_path, bindless_id);
+
+		return bindless_id;
+	}
+
+	void load_async(const std::string& file_path, uint32_t bindless_id) {
 		int width, height, nrComponents;
-		unsigned char* data = stbi_load(file_path.c_str(), &width, &height, &nrComponents, 4); // Force 4 channels
+		unsigned char* data = stbi_load(file_path.c_str(), &width, &height, &nrComponents, 4); // TODO don't Force 4 channels? idk gonna have bcX anyways
 
 		if (!data) {
 			fprintf(stderr, "[TEXTURE] Failed to load: %s\n", file_path.c_str());
@@ -127,31 +171,25 @@ namespace Texture_Manager {
 			format = VK_FORMAT_R8_UNORM;
 		}
 
-		AllocatedImage image = create_image(
-			data,
-			VkExtent3D{ static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1 },
-			format,
-			VK_IMAGE_USAGE_SAMPLED_BIT,
-			true
-		);
+		AllocatedImage image = create_image(data, VkExtent3D{ static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1 }, format, VK_IMAGE_USAGE_SAMPLED_BIT, true);
 
 		stbi_image_free(data);
 
-		// TODO make thread safe
-		uint32_t bindless_id = add_bindless_texture(image);
+		add_bindless_texture(image, bindless_id);
 
-		auto [insertIt, inserted] = textures.try_emplace(file_path);
-		insertIt->second.allocated_image = image;
-		insertIt->second.bindless_id = bindless_id;
+		texture_mutex.lock();
+			Texture& texture = textures[file_path];
+			texture.allocated_image = image;
+			texture.bindless_id = bindless_id;
+			texture.loading_state = Texture_Loading_State::Loaded;
+			printf("[TEXTURE] Loaded texture: %s (%dx%d, bindless_id=%u)\n", file_path.c_str(), width, height, bindless_id);
+		texture_mutex.unlock();
 
-		printf("[TEXTURE] Loaded texture: %s (%dx%d, bindless_id=%u)\n",
-			file_path.c_str(), width, height, bindless_id);
-
-		deq.push_function([=]() {
-			free_texture(file_path);
-		});
-
-		return bindless_id;
+		deque_mutex.lock();
+			deq.push_function([=]() {
+				free_texture(file_path);
+			});
+		deque_mutex.unlock();
 	}
 
 	AllocatedImage create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped) {
@@ -169,7 +207,9 @@ namespace Texture_Manager {
 		allocinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
 		// allocate and create the image
-		VK_CHECK(vmaCreateImage(allocator, &img_info, &allocinfo, &newImage.image, &newImage.allocation, nullptr));
+		vma_mutex.lock();
+			VK_CHECK(vmaCreateImage(allocator, &img_info, &allocinfo, &newImage.image, &newImage.allocation, nullptr));
+		vma_mutex.unlock();
 
 		// if the format is a depth format, we will need to have it use the correct
 		// aspect flag
@@ -182,42 +222,49 @@ namespace Texture_Manager {
 		VkImageViewCreateInfo view_info = imageview_create_info(format, newImage.image, aspectFlag);
 		view_info.subresourceRange.levelCount = img_info.mipLevels;
 
-		VK_CHECK(vkCreateImageView(device, &view_info, nullptr, &newImage.imageView));
+		device_mutex.lock();
+			VK_CHECK(vkCreateImageView(device, &view_info, nullptr, &newImage.imageView));
+		device_mutex.unlock();
 
 		return newImage;
 	}
 
 	AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped) {
 		size_t data_size = size.depth * size.width * size.height * 4;
-		Allocated_Buffer uploadbuffer = renderer->create_buffer(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
+		vma_mutex.lock(); // TODO maybe probably move mutex to renderer
+			Allocated_Buffer uploadbuffer = renderer->create_buffer(data_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+		vma_mutex.unlock();
+			
 		memcpy(uploadbuffer.info.pMappedData, data, data_size);
 
 		AllocatedImage new_image = create_image(size, format, usage | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, mipmapped);
 
-		renderer->immediate_submit([&](VkCommandBuffer cmd) {
-			transition_image(cmd, new_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		immediate_mutex.lock();
+			renderer->immediate_submit([&](VkCommandBuffer cmd) {
+				transition_image(cmd, new_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-			VkBufferImageCopy copyRegion = {};
-			copyRegion.bufferOffset = 0;
-			copyRegion.bufferRowLength = 0;
-			copyRegion.bufferImageHeight = 0;
+				VkBufferImageCopy copyRegion = {};
+				copyRegion.bufferOffset = 0;
+				copyRegion.bufferRowLength = 0;
+				copyRegion.bufferImageHeight = 0;
 
-			copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			copyRegion.imageSubresource.mipLevel = 0;
-			copyRegion.imageSubresource.baseArrayLayer = 0;
-			copyRegion.imageSubresource.layerCount = 1;
-			copyRegion.imageExtent = size;
+				copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+				copyRegion.imageSubresource.mipLevel = 0;
+				copyRegion.imageSubresource.baseArrayLayer = 0;
+				copyRegion.imageSubresource.layerCount = 1;
+				copyRegion.imageExtent = size;
 
-			// copy the buffer into the image
-			vkCmdCopyBufferToImage(cmd, uploadbuffer.buffer, new_image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-				&copyRegion);
+				// copy the buffer into the image
+				vkCmdCopyBufferToImage(cmd, uploadbuffer.buffer, new_image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
-			transition_image(cmd, new_image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-				VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-		});
+				transition_image(cmd, new_image.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+			});
+		immediate_mutex.unlock();
 
-		renderer->destroy_buffer(uploadbuffer);
+		vma_mutex.lock();
+			renderer->destroy_buffer(uploadbuffer);
+		vma_mutex.unlock();
 
 		return new_image;
 	}
@@ -225,10 +272,10 @@ namespace Texture_Manager {
 	uint32_t add_bindless_texture(const AllocatedImage& image) {
 		if (_nextBindlessTextureIndex > MAX_BINDLESS_TEXTURES) {
 			fprintf(stderr, "Bindless texture limit reached!\n");
-			return 0;
+			assert(false);
 		}
 
-		uint32_t textureIndex = _nextBindlessTextureIndex++;
+		uint32_t texture_index = _nextBindlessTextureIndex++;
 
 		// Update the descriptor set
 		VkDescriptorImageInfo imageInfo{};
@@ -240,14 +287,35 @@ namespace Texture_Manager {
 		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 		write.dstSet = _bindlessDescriptorSet;
 		write.dstBinding = 0;
-		write.dstArrayElement = textureIndex;
+		write.dstArrayElement = texture_index;
 		write.descriptorCount = 1;
 		write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 		write.pImageInfo = &imageInfo;
 
 		vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+		
+		return texture_index;
+	}
 
-		return textureIndex;
+	void add_bindless_texture(const AllocatedImage& image, uint32_t texture_index) {
+		// Update the descriptor set
+		VkDescriptorImageInfo imageInfo{};
+		imageInfo.sampler = _defaultSamplerLinear;
+		imageInfo.imageView = image.imageView;
+		imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+		VkWriteDescriptorSet write{};
+		write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		write.dstSet = _bindlessDescriptorSet;
+		write.dstBinding = 0;
+		write.dstArrayElement = texture_index;
+		write.descriptorCount = 1;
+		write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+		write.pImageInfo = &imageInfo;
+
+		device_mutex.lock();
+			vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+		device_mutex.unlock();
 	}
 
 	void free_texture(const std::string& str) {
@@ -259,13 +327,25 @@ namespace Texture_Manager {
 			destroy_image(it->second.allocated_image);
 			textures.erase(it);
 		}
-		else
+		else {
 			assert(false);
+		}
 	}
 
 	void destroy_image(const AllocatedImage& img) {
 		vkDestroyImageView(device, img.imageView, nullptr);
 		vmaDestroyImage(allocator, img.image, img.allocation);
+	}
+
+	void wait_for_all_loads() {
+		for (thread& load : loading_threads)
+			load.join();
+
+		loading_threads.clear();
+
+		for (const auto& [path, texture] : textures)
+			assert(texture.loading_state == Texture_Loading_State::Loaded);
+			// TODO count MB
 	}
 
 	const Texture& get_by_name(const std::string& str) {
