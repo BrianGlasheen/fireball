@@ -989,7 +989,7 @@ void Vk_Backend::allocate_model(Entity e, Model_Handle handle) {
 
 	mesh_allocations[e.id()] = alloc;
 
-	printf("[ALLOC] Allocating model '%s' for entity %llu: %u meshes\n", Model_Manager::get_model_name(handle).c_str(), e.id(), mesh_count);
+	printf("[ALLOC] Allocating model '%s' for entity %lu: %u meshes\n", Model_Manager::get_model_name(handle).c_str(), e.id(), mesh_count);
 
 	printf("[ALLOC] Alloc range: base=%u, count=%u\n", alloc.base, alloc.count);
 

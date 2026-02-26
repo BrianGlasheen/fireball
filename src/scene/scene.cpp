@@ -1,11 +1,36 @@
 #include "scene/scene.h"
 
+#include "core/physics.h"
 #include "renderer/vk_backend.h"
+#include "scene/components.h"
 
 #include <imgui.h>
 
 Scene::Scene(Vk_Backend* _renderer) {
     renderer = _renderer;
+
+    world.system<Physics_Component>()
+    .kind(flecs::OnUpdate)
+    .each([this](Entity e, Physics_Component& pc) {
+        Transform_Component& tc = e.get_mut<Transform_Component>();
+        tc.position = Physics::get_pos(pc.handle);
+        tc.rotation = Physics::get_rot(pc.handle);
+        tc.dirty = true;
+
+        // printf("id %lu pos %f %f %f\n", e.id(), tc.position.x, tc.position.y, tc.position.z);
+    });
+
+    world.observer<Physics_Component>()
+    .event(flecs::OnSet)
+    .each([this](Entity e, const Physics_Component& pc) {
+        // TODO if physics info changes remove body and readd with. Can either use new info or stuff from current info
+    });
+
+    world.observer<Physics_Component>()
+    .event(flecs::OnRemove)
+    .each([this](Entity e, const Physics_Component& pc) {
+        Physics::remove_body(pc.handle);
+    });
 
     world.system<Transform_Component>("Transform_System")
     .kind(flecs::OnUpdate)
@@ -273,7 +298,7 @@ void Scene::show_entity_inspector() {
     if (selected_entity.is_alive()) {
         std::string name = selected_entity.get<Name_Component>().string;
 
-        ImGui::Text("Entity: %s (ID: %llu)", name.c_str(), selected_entity.id());
+        ImGui::Text("Entity: %s (ID: %lu)", name.c_str(), selected_entity.id());
         ImGui::Separator();
 
         display_component<Name_Component>(selected_entity, "Name", [](Name_Component& name) {
@@ -309,7 +334,7 @@ void Scene::show_entity_inspector() {
         });
 
         display_component<Model_Component>(selected_entity, "Model", [](Model_Component& m) {
-            ImGui::Text("%s", Model_Manager::get_model_name(m.handle));
+            ImGui::Text("%s", Model_Manager::get_model_name(m.handle).c_str());
         });
 
         display_component<Light_Component>(selected_entity, "Light", [](Light_Component& l) {

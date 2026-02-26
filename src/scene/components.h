@@ -1,6 +1,7 @@
 #pragma once
 
 #include "asset/model_manager.h"
+#include "core/physics.h"
 #include "util/math.h"
 
 #include <string>
@@ -21,7 +22,8 @@ struct Name_Component {
 };
 
 struct Physics_Component {
-	
+	Physics_Handle handle;
+	Physics_Info info;
 };
 
 struct Model_Component {

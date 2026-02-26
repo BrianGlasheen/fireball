@@ -1,8 +1,10 @@
 #include "camera.h"
 #include "asset/model_manager.h"
 #include "asset/texture_manager.h"
+#include "core/physics.h"
 #include "renderer/vk_util.h"
 #include "renderer/vk_backend.h"
+#include "scene/components.h"
 #include "scene/scene.h"
 #include "util/math.h"
 
@@ -18,19 +20,21 @@
 #include <vector>
 #include <span>
 
+static bool g_spawn_requested = false;
+
 void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
 	ImGuiIO& io = ImGui::GetIO();
 	if (io.WantCaptureMouse) {
 		return;
 	}
 
-	if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_RIGHT) {
-		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-	}
-	else if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT) {
-		//glfwSetCursorPos(window, 0, 0);
-		glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-	}
+    if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_RIGHT) {
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+    }
+    else if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT) {
+        glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        g_spawn_requested = true;
+    }
 }
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -42,7 +46,7 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
 
 bool validation_layers = true;
 float main_scale;
-uint32_t width = 2000, height = 1000;
+uint32_t width = 1600, height = 900;
 float renderScale = 1.0f;
 
 Vk_Backend renderer;
@@ -80,12 +84,13 @@ int main() {
 
 	Texture_Manager::init(&renderer);
 	Model_Manager::init("../resources/models/");
+	Physics::init();
 
 	Scene scene(&renderer);
 
-	Model_Handle test = Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
-	Model_Handle house = Model_Manager::load_model("house/scene.gltf");
-	Model_Handle ciri = Model_Manager::load_model("ciri/scene.gltf");
+	// Model_Handle test = Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
+	Model_Handle wand = Model_Manager::load_model("wand/scene.gltf");
+	Model_Handle ciri = Model_Manager::load_model("turtle/scene.gltf");
 	// Model_Handle ciri = Model_Manager::load_model("bistro/bistro.gltf");
 	Model_Handle plane = Model_Manager::load_model("plane.obj");
 	//Model_Manager::load_model("factory/scene.gltf");
@@ -96,6 +101,27 @@ int main() {
 	Entity e2 = scene.create_entity("plane");
 	e2.get_mut<Transform_Component>().scale = vec3(100.0f);
 	e2.set<Model_Component>({ plane });
+
+	Physics_Info plane_info = {
+		.shape = Physics_Shape::Plane,
+		.pos = vec3(0.0f),
+		.orientation = quat(1.0f, 0.0f, 0.0f, 0.0f),
+		.scale = vec3(100.0f, 2.0f, 100.0f),
+	};
+
+	Physics_Info box = {
+		.shape = Physics_Shape::Box,
+		.pos = vec3(0.0f),
+		.orientation = quat(1.0f, 0.0f, 0.0f, 0.0f),
+		.scale = vec3(1.0f),
+	};
+
+	printf("hern\n");
+	Physics_Handle plane_handle = Physics::add_object(plane_info, true);
+	printf("hern\n");
+
+	e2.set<Physics_Component>({plane_handle, plane_info});
+	printf("hern2\n");
 	
 	Entity prev;
 	for (int i = 0; i < 5; i++) {
@@ -107,16 +133,14 @@ int main() {
 		//prev = e;
 
 		Transform_Component& tc = e.get_mut<Transform_Component>();
-		tc.position.x += 50 * i;
+		tc.position.y += 50 * i;
 		tc.dirty = true;
 
 		Model_Handle handle;
-		if (i == 0)
+		if (i % 2 == 0)
 			handle = ciri;
-		else if (i == 1)
-			handle = test;
 		else
-			handle = house;
+			handle = wand;
 
 		auto entityName = e.get<Name_Component>().string;
 		auto modelName = Model_Manager::get_model_name(handle);
@@ -138,11 +162,40 @@ int main() {
 
 		//e.add<Motion>();
 		e.set<Light_Component>({ l });
+
+		box.pos = tc.position;
+		Physics_Handle ph = Physics::add_object(box);
+		printf("physics id %d", ph);
+		e.set<Physics_Component>({ ph, box });
 	}
 
 	renderer.upload_geometry(Model_Manager::get_indices(), Model_Manager::get_vertices());
 
 	renderer.init_mesh_cull_descriptors();
+
+	auto spawn_entity = [&](const vec3& pos) {
+		static int spawn_count = 0;
+		Entity e = scene.create_entity("spawned_" + std::to_string(spawn_count++));
+
+		Transform_Component& tc = e.get_mut<Transform_Component>();
+		tc.position = pos;
+		tc.dirty = true;
+
+		Model_Handle handle = (spawn_count % 2 == 0) ? ciri : wand;
+		e.set<Model_Component>({ handle });
+
+		Physics_Info info = {
+			.shape = Physics_Shape::Box,
+			.pos   = pos,
+			.orientation = quat(1.0f, 0.0f, 0.0f, 0.0f),
+			.scale = vec3(1.0f),
+		};
+
+		Physics_Handle ph = Physics::add_object(info, false);
+		e.set<Physics_Component>({ ph, info });
+
+		printf("[MAIN] spawned entity at (%.2f, %.2f, %.2f)\n", pos.x, pos.y, pos.z);
+	};
 
 	Camera camera;
 
@@ -151,6 +204,7 @@ int main() {
 	uint32_t fps_frames = 0;
 	double fps_timer = 0.0;
 
+	Physics::optimize_broad_phase();
     while (!glfwWindowShouldClose(window)) {
 		fps_frames++;
 		double current_time = glfwGetTime();
@@ -222,6 +276,52 @@ int main() {
 			}
 		});
 
+		scene.world.query<Physics_Component>()
+		.each([&](Entity e, const Physics_Component& pc)
+		{
+			if (pc.info.shape != Physics_Shape::Box &&
+				pc.info.shape != Physics_Shape::Plane)
+				return;
+
+			vec3 center = Physics::get_pos(pc.handle);
+			quat rot = Physics::get_orientation(pc.handle);
+			vec3 half = pc.info.scale * 0.5f;
+
+			vec4 green(0.0f, 1.0f, 0.0f, 1.0f);
+
+			vec3 corners[8] = {
+				{-half.x, -half.y, -half.z},
+				{ half.x, -half.y, -half.z},
+				{ half.x,  half.y, -half.z},
+				{-half.x,  half.y, -half.z},
+
+				{-half.x, -half.y,  half.z},
+				{ half.x, -half.y,  half.z},
+				{ half.x,  half.y,  half.z},
+				{-half.x,  half.y,  half.z},
+			};
+
+			for (int i = 0; i < 8; ++i)
+				corners[i] = center + (rot * corners[i]);
+
+			auto& dbg = renderer.debug_renderer;
+
+			dbg.add_line(corners[0], corners[1], green);
+			dbg.add_line(corners[1], corners[2], green);
+			dbg.add_line(corners[2], corners[3], green);
+			dbg.add_line(corners[3], corners[0], green);
+
+			dbg.add_line(corners[4], corners[5], green);
+			dbg.add_line(corners[5], corners[6], green);
+			dbg.add_line(corners[6], corners[7], green);
+			dbg.add_line(corners[7], corners[4], green);
+
+			dbg.add_line(corners[0], corners[4], green);
+			dbg.add_line(corners[1], corners[5], green);
+			dbg.add_line(corners[2], corners[6], green);
+			dbg.add_line(corners[3], corners[7], green);
+		});
+
 		ImGui_ImplVulkan_NewFrame();
 		ImGui_ImplGlfw_NewFrame();
 		ImGui::NewFrame();
@@ -249,6 +349,14 @@ int main() {
 			camera.move(window, dt);
 		}
 
+		Physics::update();
+
+		if (g_spawn_requested) {
+			g_spawn_requested = false;
+			vec3 spawn_pos = camera.position + camera.front * 5.0f;
+			spawn_entity(spawn_pos);
+		}
+
 		scene.update(dt);
 
 		mat4 view = camera.get_view();
@@ -264,6 +372,7 @@ int main() {
     }
 
 	renderer.cleanup();
+	// Physics::shutdown(); // ??
 
 	glfwDestroyWindow(window);
 	glfwTerminate();

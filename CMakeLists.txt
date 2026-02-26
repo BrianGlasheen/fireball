@@ -36,7 +36,7 @@ set(
     "external/imgui/backends/imgui_impl_vulkan.cpp"
 )
 
-# set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
@@ -77,6 +77,17 @@ set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "" FORCE)
 set(ASSIMP_NO_EXPORT ON CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
+# jolt
+set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+set(USE_AVX2 ON CACHE BOOL "" FORCE)
+set(USE_AVX ON CACHE BOOL "" FORCE)
+set(USE_SSE4_1 ON CACHE BOOL "" FORCE)
+set(USE_SSE4_2 ON CACHE BOOL "" FORCE)
+set(USE_LZCNT ON CACHE BOOL "" FORCE)
+set(USE_TZCNT ON CACHE BOOL "" FORCE)
+set(USE_F16C ON CACHE BOOL "" FORCE)
+set(USE_FMADD ON CACHE BOOL "" FORCE)
+
 find_package(Vulkan REQUIRED)
 
 find_package(glfw3 QUIET)
@@ -94,11 +105,13 @@ add_subdirectory(external/vma)
 add_subdirectory(external/assimp)
 add_subdirectory(external/meshoptimizer)
 add_subdirectory(external/flecs)
+add_subdirectory(external/JoltPhysics/Build)
 
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         "external/imgui"
         "external/imgui/backends"
+        "external/JoltPhysics"
 )
 
 if(UNIX AND NOT APPLE)
@@ -120,6 +133,7 @@ target_link_libraries(
         assimp
         meshoptimizer
         flecs::flecs_static
+        Jolt
 )
 
 find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)

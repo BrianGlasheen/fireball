@@ -40,3 +40,4 @@ using glm::rotate;
 using glm::max;
 using glm::min;
 using glm::ortho;
+using glm::eulerAngles;
