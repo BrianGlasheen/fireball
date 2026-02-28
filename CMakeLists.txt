@@ -35,6 +35,7 @@ file (
     SERVER_SOURCE_FILES
     "src/server/*.h"
     "src/server/*.cpp"
+    "src/client/scene.cpp"
 )
 
 set(
@@ -128,6 +129,7 @@ target_link_libraries(
         Jolt
 )
 
+
 add_executable(
     client 
         ${CLIENT_SOURCE_FILES}
@@ -135,6 +137,7 @@ add_executable(
         ${GLSL_HEADER_FILES}
 )
 
+target_compile_definitions(client PUBLIC FIREBALL_CLIENT)
 target_link_libraries(client PRIVATE fireball)
 
 if(UNIX AND NOT APPLE)

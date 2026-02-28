@@ -2,8 +2,10 @@
 
 #include "fireball/scene/components.h"
 
+#ifdef FIREBALL_CLIENT
 #include "fireball/renderer/vk_backend.h"
 #include <imgui.h>
+#endif
 
 Scene::Scene(Vk_Backend* _renderer) {
     renderer = _renderer;
@@ -68,6 +70,7 @@ Scene::Scene(Vk_Backend* _renderer) {
         t.updated = true;
     });
 
+#ifdef FIREBALL_CLIENT
     world.system<Model_Component>()
     .kind(flecs::OnUpdate)
     .each([this](Entity e, Model_Component& m) {
@@ -132,6 +135,7 @@ Scene::Scene(Vk_Backend* _renderer) {
         if (renderer)
             renderer->deallocate_light(e);
     });
+#endif
 }
 
 void Scene::update(float dt) {
@@ -151,6 +155,7 @@ void Scene::remove_entity(Entity e) {
 }
 
 void Scene::show_entity_inspector() {
+#ifdef FIREBALL_CLIENT
     ImGui::Begin("Entity Inspector");
 
     world.defer_begin();
@@ -392,10 +397,12 @@ void Scene::show_entity_inspector() {
     world.defer_end();
 
     ImGui::End();
+#endif
 }
 
 template<typename T>
 bool Scene::display_component(Entity e, const char* name, std::function<void(T&)> ui_func) {
+#ifdef FIREBALL_CLIENT
     if (!e.has<T>()) return false;
     
     ImGuiTreeNodeFlags header_flags =
@@ -422,4 +429,7 @@ bool Scene::display_component(Entity e, const char* name, std::function<void(T&)
     }
 
     return true;
+#else
+    return false;
+#endif
 }
