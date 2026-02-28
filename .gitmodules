@@ -26,3 +26,6 @@
 [submodule "external/JoltPhysics"]
 	path = external/JoltPhysics
 	url = https://github.com/jrouwe/JoltPhysics.git
+[submodule "external/GameNetworkingSockets"]
+	path = external/GameNetworkingSockets
+	url = https://github.com/ValveSoftware/GameNetworkingSockets.git

@@ -90,6 +90,7 @@ add_subdirectory(external/assimp)
 add_subdirectory(external/meshoptimizer)
 add_subdirectory(external/flecs)
 add_subdirectory(external/JoltPhysics/Build)
+add_subdirectory(external/GameNetworkingSockets)
 
 add_library(fireball STATIC
     ${FIREBALL_SOURCE_FILES}
@@ -127,8 +128,8 @@ target_link_libraries(
         meshoptimizer
         flecs::flecs_static
         Jolt
+        GameNetworkingSockets
 )
-
 
 add_executable(
     client 
