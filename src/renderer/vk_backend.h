@@ -110,6 +110,8 @@ public:
 	mat4 frame_view; // TODO RM
 	uint32_t current_swapchain_index; // same
 
+	vec4 clear_color;
+
 	int init(GLFWwindow* window, uint32_t width, uint32_t height, bool validation_layers);
 	int init_vulkan(GLFWwindow* window, bool validation_layers);
 	void create_swapchain(uint32_t width, uint32_t height);
@@ -148,10 +150,13 @@ public:
 
 	void cleanup();
 
-	void render(const mat4& projection, const mat4& view);
+	void begin_frame();
 	void generate_draw_commands(VkCommandBuffer cmd);
+	void render(const mat4& projection, const mat4& view);
 	void draw_background(VkCommandBuffer cmd);
 	void draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view);
+	void draw_blank(vec4 color);
+	void end_frame_and_submit();
 
 	Allocated_Buffer create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
 	void destroy_buffer(const Allocated_Buffer& buffer);

@@ -9,6 +9,7 @@
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
+#include <vulkan/vulkan_core.h>
 
 int Vk_Backend::init(GLFWwindow* window, uint32_t w, uint32_t h, bool validation_layers) {
 	if (init_vulkan(window, validation_layers))
@@ -847,21 +848,18 @@ void Vk_Backend::init_render_graph() {
 
 	render_graph.push_back(
 		Render_Graph_Node{
-			.name = "generate_draw_commands",
+			.name = "draw_background",
 			.execute = [this](VkCommandBuffer cmd) {
-				generate_draw_commands(cmd);
+				draw_background(cmd);
 			}
 		}
 	);
 
 	render_graph.push_back(
 		Render_Graph_Node{
-			.name = "draw_background",
+			.name = "generate_draw_commands",
 			.execute = [this](VkCommandBuffer cmd) {
-				//make the swapchain image into writeable mode before rendering
-				transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
-
-				draw_background(cmd);
+				generate_draw_commands(cmd);
 			}
 		}
 	);
@@ -874,15 +872,25 @@ void Vk_Backend::init_render_graph() {
 				transition_image(cmd, _depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
 				draw_geometry(cmd, frame_proj, frame_view);
-		}
+			}
 		}
 	);
 
 	render_graph.push_back(
 		Render_Graph_Node{
 			.name = "draw_debug",
-			.execute = [this](VkCommandBuffer cmd) {
-				debug_renderer.render(cmd, frame_proj * frame_view);
+				.execute = [this](VkCommandBuffer cmd) {
+					VkRenderingAttachmentInfo colorAttachment = attachment_info(
+						_drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+					VkRenderingAttachmentInfo depthAttachment = depth_attachment_info(
+						_depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+					VkRenderingInfo renderInfo = rendering_info(_drawExtent, &colorAttachment, &depthAttachment);
+					vkCmdBeginRendering(cmd, &renderInfo);
+
+					debug_renderer.render(cmd, frame_proj * frame_view);
+
+					vkCmdEndRendering(cmd);
 			}
 		}
 	);
@@ -891,39 +899,10 @@ void Vk_Backend::init_render_graph() {
 		Render_Graph_Node{
 			.name = "copy_to_swapchain",
 			.execute = [this](VkCommandBuffer cmd) {
-				vkCmdEndRendering(cmd);
-
 				transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 				transition_image(cmd, _swapchainImages[current_swapchain_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-				// execute a copy from the draw image into the swapchain
 				copy_image_to_image(cmd, _drawImage.image, _swapchainImages[current_swapchain_index], _drawExtent, _swapchainExtent);
-			}
-		}
-	);
-
-	render_graph.push_back(
-		Render_Graph_Node{
-			.name = "draw_imgui",
-			.execute = [this](VkCommandBuffer cmd) {
-				VkRenderingAttachmentInfo colorAttachment = {};
-				colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-				colorAttachment.imageView = _swapchainImageViews[current_swapchain_index];
-				colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-				colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // Keep existing content
-				colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-
-				VkRenderingInfo renderInfo = {};
-				renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-				renderInfo.renderArea.offset = { 0, 0 };
-				renderInfo.renderArea.extent = _swapchainExtent;
-				renderInfo.layerCount = 1;
-				renderInfo.colorAttachmentCount = 1;
-				renderInfo.pColorAttachments = &colorAttachment;
-
-				vkCmdBeginRendering(cmd, &renderInfo);
-				ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
-				vkCmdEndRendering(cmd);
 			}
 		}
 	);
@@ -1288,10 +1267,7 @@ void Vk_Backend::cleanup() {
 	vkDestroyInstance(_instance, nullptr);
 }
 
-void Vk_Backend::render(const mat4& projection, const mat4& view) {
-	frame_proj = projection; // TODO hack rm
-	frame_view = view;
-
+void Vk_Backend::begin_frame() {
 	// wait until the gpu has finished rendering the last frame. Timeout of 1
 	// second
 	VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
@@ -1327,13 +1303,58 @@ void Vk_Backend::render(const mat4& projection, const mat4& view) {
 
 	VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
+	transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+}
+
+void Vk_Backend::draw_blank(vec4 color) {
+	clear_color = color;
+
+	VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
+
+	for (const Render_Graph_Node& rgn : render_graph) {
+		if (rgn.name == "draw_background" || rgn.name == "copy_to_swapchain")
+			rgn.execute(cmd);
+	}
+}
+
+
+void Vk_Backend::render(const mat4& projection, const mat4& view) {
+	frame_proj = projection; // TODO hack rm
+	frame_view = view;
+
+	VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
 
 	for (const Render_Graph_Node& rgn : render_graph)
 		rgn.execute(cmd);
+}
 
+void Vk_Backend::end_frame_and_submit() {
+	VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
+
+	// execute by name imgui
+	transition_image(cmd, _swapchainImages[current_swapchain_index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+	VkRenderingAttachmentInfo colorAttachment = {};
+	colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+	colorAttachment.imageView = _swapchainImageViews[current_swapchain_index];
+	colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // Keep existing content
+	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+	VkRenderingInfo renderInfo = {};
+	renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+	renderInfo.renderArea.offset = { 0, 0 };
+	renderInfo.renderArea.extent = _swapchainExtent;
+	renderInfo.layerCount = 1;
+	renderInfo.colorAttachmentCount = 1;
+	renderInfo.pColorAttachments = &colorAttachment;
+
+	vkCmdBeginRendering(cmd, &renderInfo);
+	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+	vkCmdEndRendering(cmd);
 
 	// set swapchain image layout to Present so we can show it on the screen
-	transition_image(cmd, _swapchainImages[swapchainImageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+	transition_image(cmd, _swapchainImages[current_swapchain_index], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
 	//finalize the command buffer (we can no longer add commands, but it can now be executed)
 	VK_CHECK(vkEndCommandBuffer(cmd));
@@ -1345,7 +1366,7 @@ void Vk_Backend::render(const mat4& projection, const mat4& view) {
 
 	VkSemaphoreSubmitInfo waitInfo = semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, get_current_frame()._swapchainSemaphore);
 	//VkSemaphoreSubmitInfo signalInfo = semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, get_current_frame()._renderSemaphore);
-	VkSemaphoreSubmitInfo signalInfo = semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, _readyForPresentSemaphores[swapchainImageIndex]);
+	VkSemaphoreSubmitInfo signalInfo = semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, _readyForPresentSemaphores[current_swapchain_index]);
 
 	VkSubmitInfo2 submit = submit_info(&cmdinfo, &signalInfo, &waitInfo);
 
@@ -1364,10 +1385,10 @@ void Vk_Backend::render(const mat4& projection, const mat4& view) {
 	presentInfo.swapchainCount = 1;
 
 	//presentInfo.pWaitSemaphores = &get_current_frame()._renderSemaphore;
-	presentInfo.pWaitSemaphores = &_readyForPresentSemaphores[swapchainImageIndex];
+	presentInfo.pWaitSemaphores = &_readyForPresentSemaphores[current_swapchain_index];
 	presentInfo.waitSemaphoreCount = 1;
 
-	presentInfo.pImageIndices = &swapchainImageIndex;
+	presentInfo.pImageIndices = &current_swapchain_index;
 
 	//VK_CHECK(vkQueuePresentKHR(_graphicsQueue, &presentInfo));
 	VkResult presentResult = vkQueuePresentKHR(_graphicsQueue, &presentInfo);
@@ -1412,28 +1433,24 @@ void Vk_Backend::generate_draw_commands(VkCommandBuffer cmd) {
 }
 
 void Vk_Backend::draw_background(VkCommandBuffer cmd) {
-	//make a clear-color from frame number. This will flash with a 120 frame period.
 	VkClearColorValue clearValue;
-	//float flash = std::abs(std::sin(_frameNumber / 120.f));
-	clearValue = { { 0.0f, 0.0f, 0.5f, 1.0f } };
-
+	float f = std::abs(std::sin(_frameNumber / 120.f)) * .5 + .5;
+	clearValue = { { f * clear_color.x, f * clear_color.y, f * clear_color.z, clear_color.w } };
+	
 	VkImageSubresourceRange clearRange = image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
-
-	//clear image
 	vkCmdClearColorImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
-
-	//ComputeEffect& effect = backgroundEffects[currentBackgroundEffect];
-
-	//vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, effect.pipeline);
-
-	//// bind the descriptor set containing the draw image for the compute pipeline
-	//vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, _gradientPipelineLayout, 0, 1, &_drawImageDescriptors, 0, nullptr);
-
-	//vkCmdPushConstants(cmd, _gradientPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(ComputePushConstants), &effect.data);
-
-	//// execute the compute pipeline dispatch. We are using 16x16 workgroup size so we need to divide by it
-	//vkCmdDispatch(cmd, std::ceil(_drawExtent.width / 16.0), std::ceil(_drawExtent.height / 16.0), 1);
 }
+
+// void Vk_Backend::draw_background() {
+// 	for (const Render_Graph_Node& rgn : render_graph) {
+// 		if (rgn.name == "draw_background" || 
+// 			rgn.name == "copy_to_swapchain" ||
+// 			rgn.name == "draw_imgui") {
+// 			continue;
+// 		}
+// 		rgn.execute(cmd);
+// 	}
+// }
 
 void Vk_Backend::draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view) {
 	//begin a render pass  connected to our draw image
@@ -1484,6 +1501,8 @@ void Vk_Backend::draw_geometry(VkCommandBuffer cmd, const mat4& projection, cons
 
 	// draw
 	vkCmdDrawIndexedIndirectCount(cmd, transparent_command_buffer.buffer, 0, command_count_buffer.buffer, offsetof(Command_Counts, transparent), MAX_DRAW_COMMANDS, sizeof(VkDrawIndexedIndirectCommand));
+
+	vkCmdEndRendering(cmd); 
 }
 
 Allocated_Buffer Vk_Backend::create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage) {

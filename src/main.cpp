@@ -22,6 +22,16 @@
 
 static bool g_spawn_requested = false;
 
+enum class Game_State {
+	MAIN_MENU = 0,
+	LOADING,
+	PLAYING,
+	PAUSE_MENU,
+	NUM_GAME_STATE
+};
+
+static Game_State game_state = Game_State::PLAYING;
+
 void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
 	ImGuiIO& io = ImGui::GetIO();
 	if (io.WantCaptureMouse) {
@@ -247,28 +257,95 @@ int main() {
 		//	resize_swapchain(window);
 		//}
 
+		ImGui_ImplVulkan_NewFrame();
+		ImGui_ImplGlfw_NewFrame();
+		ImGui::NewFrame();
+
+		renderer.begin_frame();
+
+		int state = static_cast<int>(game_state);
+		if (ImGui::SliderInt("Game state", &state, 0, static_cast<int>(Game_State::NUM_GAME_STATE) - 1)) {
+			game_state = static_cast<Game_State>(state);
+		}
+
+	static char ip_buffer[64] = "127.0.0.1";
+	static int port = 7777;
+	static float fake_loading_progress = 0.0f;
+
+	if (game_state == Game_State::MAIN_MENU) {
+    	ImGui::Begin("Main Menu", nullptr,
+			ImGuiWindowFlags_NoResize |
+			ImGuiWindowFlags_NoCollapse |
+			ImGuiWindowFlags_AlwaysAutoResize);
+
+		ImGui::Text("Connect to Server");
+		ImGui::Separator();
+
+		ImGui::InputText("IP Address", ip_buffer, IM_ARRAYSIZE(ip_buffer));
+		ImGui::InputInt("Port", &port);
+
+		if (ImGui::Button("Connect")) {
+			// read network
+			fake_loading_progress = 0.0f;
+			game_state = Game_State::LOADING;
+		}
+
+		ImGui::SameLine();
+
+		if (ImGui::Button("Quit")) {
+		}
+
+		ImGui::End();
+
+		renderer.draw_blank(vec4(0.4f, 0.7f, 0.2f, 1.0f));
+	}
+	else if (game_state == Game_State::LOADING) {
+		fake_loading_progress += 0.001f;
+		if (fake_loading_progress >= 1.0f) {
+			fake_loading_progress = 1.0f;
+			game_state = Game_State::PLAYING;
+		}
+
+		ImGui::Begin("Loading...", nullptr,
+			ImGuiWindowFlags_NoResize |
+			ImGuiWindowFlags_NoCollapse |
+			ImGuiWindowFlags_AlwaysAutoResize);
+
+		ImGui::Text("Connecting to server...");
+		ImGui::ProgressBar(fake_loading_progress, ImVec2(300, 0));
+
+		if (ImGui::Button("Cancel"))
+			game_state = Game_State::MAIN_MENU;
+
+		ImGui::End();
+
+		renderer.draw_blank(vec4(0.4f, 0.2f, 0.7f, 1.0f));
+	}
+	else if (game_state == Game_State::PLAYING) {
+		fake_loading_progress = 0.0f;
+
 		// TODO stuff code in some corner
 		scene.world.query<Light_Component>()
-		.each([&](Entity e, const Light_Component& light) {
-			vec3 pos = vec3(e.get<Transform_Component>().world_transform[3]);
-			renderer.debug_renderer.add_point(
-				pos,
-				vec4(light.color, 1)
-			);
-			renderer.debug_renderer.add_line(
-				pos, pos + vec3(0.0f, 10.0f, 0.0f)
-			);
+			.each([&](Entity e, const Light_Component& light) {
+				vec3 pos = vec3(e.get<Transform_Component>().world_transform[3]);
+				renderer.debug_renderer.add_point(
+					pos,
+					vec4(light.color, 1)
+				);
+				renderer.debug_renderer.add_line(
+					pos, pos + vec3(0.0f, 10.0f, 0.0f)
+				);
 		});
 
 		scene.world.query<Model_Component>()
 			.each([&](Entity e, const Model_Component& model) {
-			if (model.handle.animated) {
-				const auto& bones = Model_Manager::get_model_bones(model.handle);
-				mat4 worldTransform = e.get<Transform_Component>().world_transform;
+				if (model.handle.animated) {
+					const auto& bones = Model_Manager::get_model_bones(model.handle);
+					mat4 worldTransform = e.get<Transform_Component>().world_transform;
 
-				for (const Bone& b : bones) {
-					mat4 bindPose = glm::inverse(b.inverse_bind);
-					vec3 boneLocalPos = vec3(bindPose[3]);
+					for (const Bone& b : bones) {
+						mat4 bindPose = glm::inverse(b.inverse_bind);
+						vec3 boneLocalPos = vec3(bindPose[3]);
 					vec3 boneWorldPos = vec3(worldTransform * vec4(boneLocalPos, 1.0f));
 
 					renderer.debug_renderer.add_point(boneWorldPos, vec4(1.0f, 0.0f, 0.0f, 1.0f));
@@ -277,92 +354,91 @@ int main() {
 		});
 
 		scene.world.query<Physics_Component>()
-		.each([&](Entity e, const Physics_Component& pc)
-		{
-			if (pc.info.shape != Physics_Shape::Box &&
-				pc.info.shape != Physics_Shape::Plane)
-				return;
+			.each([&](Entity e, const Physics_Component& pc)
+			{
+				if (pc.info.shape != Physics_Shape::Box &&
+					pc.info.shape != Physics_Shape::Plane)
+					return;
 
-			vec3 center = Physics::get_pos(pc.handle);
-			quat rot = Physics::get_orientation(pc.handle);
-			vec3 half = pc.info.scale * 0.5f;
+				vec3 center = Physics::get_pos(pc.handle);
+				quat rot = Physics::get_orientation(pc.handle);
+				vec3 half = pc.info.scale * 0.5f;
 
-			vec4 green(0.0f, 1.0f, 0.0f, 1.0f);
+				vec4 green(0.0f, 1.0f, 0.0f, 1.0f);
 
-			vec3 corners[8] = {
-				{-half.x, -half.y, -half.z},
-				{ half.x, -half.y, -half.z},
-				{ half.x,  half.y, -half.z},
-				{-half.x,  half.y, -half.z},
+				vec3 corners[8] = {
+					{-half.x, -half.y, -half.z},
+					{ half.x, -half.y, -half.z},
+					{ half.x,  half.y, -half.z},
+					{-half.x,  half.y, -half.z},
 
-				{-half.x, -half.y,  half.z},
-				{ half.x, -half.y,  half.z},
-				{ half.x,  half.y,  half.z},
-				{-half.x,  half.y,  half.z},
-			};
+					{-half.x, -half.y,  half.z},
+					{ half.x, -half.y,  half.z},
+					{ half.x,  half.y,  half.z},
+					{-half.x,  half.y,  half.z},
+				};
 
-			for (int i = 0; i < 8; ++i)
-				corners[i] = center + (rot * corners[i]);
+				for (int i = 0; i < 8; ++i)
+					corners[i] = center + (rot * corners[i]);
 
-			auto& dbg = renderer.debug_renderer;
+				auto& dbg = renderer.debug_renderer;
 
-			dbg.add_line(corners[0], corners[1], green);
-			dbg.add_line(corners[1], corners[2], green);
-			dbg.add_line(corners[2], corners[3], green);
-			dbg.add_line(corners[3], corners[0], green);
+				dbg.add_line(corners[0], corners[1], green);
+				dbg.add_line(corners[1], corners[2], green);
+				dbg.add_line(corners[2], corners[3], green);
+				dbg.add_line(corners[3], corners[0], green);
 
-			dbg.add_line(corners[4], corners[5], green);
-			dbg.add_line(corners[5], corners[6], green);
-			dbg.add_line(corners[6], corners[7], green);
-			dbg.add_line(corners[7], corners[4], green);
+				dbg.add_line(corners[4], corners[5], green);
+				dbg.add_line(corners[5], corners[6], green);
+				dbg.add_line(corners[6], corners[7], green);
+				dbg.add_line(corners[7], corners[4], green);
 
-			dbg.add_line(corners[0], corners[4], green);
-			dbg.add_line(corners[1], corners[5], green);
-			dbg.add_line(corners[2], corners[6], green);
-			dbg.add_line(corners[3], corners[7], green);
-		});
+				dbg.add_line(corners[0], corners[4], green);
+				dbg.add_line(corners[1], corners[5], green);
+				dbg.add_line(corners[2], corners[6], green);
+				dbg.add_line(corners[3], corners[7], green);
+			});
 
-		ImGui_ImplVulkan_NewFrame();
-		ImGui_ImplGlfw_NewFrame();
-		ImGui::NewFrame();
+			if (ImGui::Begin("Camera Controls")) {
+				ImGui::SliderFloat("X", &camera.position.x, -5000.0f, 5000.0f);
+				ImGui::SliderFloat("Y", &camera.position.y, -5000.0f, 5000.0f);
+				ImGui::SliderFloat("Z", &camera.position.z, -5000.0f, 5000.0f);
 
-		if (ImGui::Begin("Camera Controls")) {
-			ImGui::SliderFloat("X", &camera.position.x, -5000.0f, 5000.0f);
-			ImGui::SliderFloat("Y", &camera.position.y, -5000.0f, 5000.0f);
-			ImGui::SliderFloat("Z", &camera.position.z, -5000.0f, 5000.0f);
+				ImGui::SliderFloat("Pitch", &camera.pitch, -89.0f, 89.0f);
+				ImGui::SliderFloat("Yaw", &camera.yaw, -180.0f, 180.0f);
+				ImGui::SliderFloat("Zoom", &camera.zoom, -180.0f, 180.0f);
 
-			ImGui::SliderFloat("Pitch", &camera.pitch, -89.0f, 89.0f);
-			ImGui::SliderFloat("Yaw", &camera.yaw, -180.0f, 180.0f);
-			ImGui::SliderFloat("Zoom", &camera.zoom, -180.0f, 180.0f);
+				ImGui::End();
+			}
 
-			ImGui::End();
+			scene.show_entity_inspector();
+
+			if (!ImGui::GetIO().WantCaptureMouse) {
+				double xpos, ypos;
+				glfwGetCursorPos(window, &xpos, &ypos);
+				camera.update(xpos, ypos);
+				camera.move(window, dt);
+			}
+
+			Physics::update();
+
+			if (g_spawn_requested) {
+				g_spawn_requested = false;
+				vec3 spawn_pos = camera.position + camera.front * 5.0f;
+				spawn_entity(spawn_pos);
+			}
+
+			scene.update(dt);
+
+			mat4 view = camera.get_view();
+			mat4 projection = camera.get_projection((float)width / (float)height);
+
+			renderer.clear_color  = vec4(0.2f, 0.2f, 0.8f, 1.0f);
+			renderer.render(projection, view);
 		}
-
-		scene.show_entity_inspector();
 
 		ImGui::Render();
-
-		if (!ImGui::GetIO().WantCaptureMouse) {
-			double xpos, ypos;
-			glfwGetCursorPos(window, &xpos, &ypos);
-			camera.update(xpos, ypos);
-			camera.move(window, dt);
-		}
-
-		Physics::update();
-
-		if (g_spawn_requested) {
-			g_spawn_requested = false;
-			vec3 spawn_pos = camera.position + camera.front * 5.0f;
-			spawn_entity(spawn_pos);
-		}
-
-		scene.update(dt);
-
-		mat4 view = camera.get_view();
-		mat4 projection = camera.get_projection((float)width / (float)height);
-
-		renderer.render(projection, view);
+		renderer.end_frame_and_submit();
 
 		ImGuiIO& io = ImGui::GetIO();
 		if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {

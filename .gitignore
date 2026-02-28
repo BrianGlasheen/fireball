@@ -2,3 +2,4 @@ build/*
 resources/*
 out/*
 .vs/*
+.cache/*
