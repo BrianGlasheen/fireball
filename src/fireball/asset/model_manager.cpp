@@ -2,19 +2,17 @@
 
 #include "texture_manager.h"
 
+#include "fireball/util/time.h"
+
 #include <assimp/GltfMaterial.h>
 #include <meshoptimizer.h>
 #include <stb_image.h>
 
-#include <chrono>
 #include <mutex>
 #include <thread>
 
-using std::chrono::system_clock, std::chrono::time_point,std::chrono::milliseconds, std::chrono::duration_cast;
 using std::mutex;
 using std::thread;
-
-typedef time_point<system_clock> Time;
 
 struct Animation {
     std::string name;
@@ -81,7 +79,7 @@ namespace Model_Manager {
         );
     }
 
-    void init(const std::string& base) {
+    void init(const std::string& base, bool headless) {
         base_path = base;
     }
 
@@ -126,7 +124,7 @@ namespace Model_Manager {
     }
 
     void load_model_async(const std::string& path, Model_Handle handle, const Mesh_Opt_Flags mesh_opt_flags) {
-        Time start_time = system_clock::now();
+        Time start_time = high_resolution_clock::now();
 
         Assimp::Importer import;
         const aiScene* scene = import.ReadFile(path, aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenSmoothNormals | aiProcess_ValidateDataStructure | aiProcess_PopulateArmatureData);
@@ -171,7 +169,7 @@ namespace Model_Manager {
             g_models[handle.index].state = Loading_State::Loaded;
         model_mutex.unlock();
 
-        double elapsed = duration_cast<milliseconds>(system_clock::now() - start_time).count();
+        double elapsed = duration_cast<milliseconds>(high_resolution_clock::now() - start_time).count();
 
         printf("[Model] Loaded %s: %zu meshes %zu vertices (%.2f MB) %zu indices (%.2f MB) in %.1f Ms\n", path.c_str(), meshes.size(), vertex_buffer.size(), (vertex_buffer.size() * sizeof(Vertex)) * 1e-6, index_buffer.size(), (index_buffer.size() * sizeof(uint32_t)) * 1e-6, elapsed);
     }

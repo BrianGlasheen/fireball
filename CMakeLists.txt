@@ -1,7 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(fireball)
-
 option(SHADER_DEBUG "Embed debug information into SPIV shaders" OFF)
 
 file(
@@ -25,11 +23,18 @@ file (
     "src/fireball/*.cpp"
 )
 
-file(
+file (
     GLOB_RECURSE
-    CPP_SOURCE_FILES
-    "src/*.h"
-    "src/*.cpp"
+    CLIENT_SOURCE_FILES
+    "src/client/*.h"
+    "src/client/*.cpp"
+)
+
+file (
+    GLOB_RECURSE
+    SERVER_SOURCE_FILES
+    "src/server/*.h"
+    "src/server/*.cpp"
 )
 
 set(
@@ -109,10 +114,6 @@ target_include_directories(fireball
         "external/stb"
 )
 
-if(UNIX AND NOT APPLE)
-    target_link_libraries(fireball PUBLIC X11 Xcursor Xrandr Xi Xinerama Xxf86vm pthread dl)
-endif()
-
 target_link_libraries(
     fireball
     PUBLIC
@@ -127,12 +128,26 @@ target_link_libraries(
         Jolt
 )
 
-add_executable(client src/client.cpp ${GLSL_SOURCE_FILES} ${GLSL_HEADER_FILES})
+add_executable(
+    client 
+        ${CLIENT_SOURCE_FILES}
+        ${GLSL_SOURCE_FILES} 
+        ${GLSL_HEADER_FILES}
+)
+
 target_link_libraries(client PRIVATE fireball)
+
+if(UNIX AND NOT APPLE)
+    target_link_libraries(fireball PUBLIC X11 Xcursor Xrandr Xi Xinerama Xxf86vm pthread dl)
+endif()
+
 source_group("Shaders" FILES ${GLSL_SOURCE_FILES} ${GLSL_HEADER_FILES})
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${FIREBALL_SOURCE_FILES})
 
-add_executable(server src/server.cpp)
+add_executable(
+    server 
+        ${SERVER_SOURCE_FILES}
+)
 target_link_libraries(server PRIVATE fireball)
 
 find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)

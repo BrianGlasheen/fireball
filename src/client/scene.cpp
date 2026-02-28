@@ -1,10 +1,8 @@
-#include "scene.h"
+#include "fireball/scene/scene.h"
 
-#include "components.h"
+#include "fireball/scene/components.h"
 
-#include "fireball/core/physics.h"
 #include "fireball/renderer/vk_backend.h"
-
 #include <imgui.h>
 
 Scene::Scene(Vk_Backend* _renderer) {
@@ -70,35 +68,30 @@ Scene::Scene(Vk_Backend* _renderer) {
         t.updated = true;
     });
 
-
     world.system<Model_Component>()
     .kind(flecs::OnUpdate)
     .each([this](Entity e, Model_Component& m) {
         if (e.get<Transform_Component>().updated) {
-            //printf("[SCENE] updating entity %s, model %s\n", e.get<Name_Component>().string.c_str(), Model_Manager::get_model_name(m.handle).c_str());
-
-            renderer->update_meshes(e, m.handle);
+            if (renderer)
+                renderer->update_meshes(e, m.handle);
+                // if materials new then update
+                // mesh flags change (shadows, invisible)
         }
-
-        // if materials new then update
-
-        // mesh flags change (shadows, invisible)
     });
     
     world.observer<Model_Component>()
     .event(flecs::OnSet)
     .each([this](Entity e, Model_Component& model) {
-        printf("[SCENE] WATCHER TRIGGERED for entity %s, model %s\n", e.get<Name_Component>().string.c_str(), Model_Manager::get_model_name(model.handle).c_str());
-
-        renderer->allocate_model(e, model.handle);
+        if (renderer)
+            renderer->allocate_model(e, model.handle);
     });
 
     world.observer<Model_Component>()
     .event(flecs::OnRemove)
     .each([this](Entity e, const Model_Component& model) {
-        renderer->deallocate_model(e);
+        if (renderer)
+            renderer->deallocate_model(e);
     });
-
 
     world.system<Light_Component>()
     .kind(flecs::OnUpdate)
@@ -111,8 +104,9 @@ Scene::Scene(Vk_Backend* _renderer) {
                 .params = vec4(light.inner_cone_angle, light.outer_cone_angle, 0, light.enabled ? 1.0f : 0.0f)
             };
 
-            renderer->update_light(e, l);
-            light.dirty = false;
+            if (renderer)
+                renderer->update_light(e, l);
+            
             //printf("updated light\n");
         }
     });
@@ -128,13 +122,15 @@ Scene::Scene(Vk_Backend* _renderer) {
             .params = vec4(light.inner_cone_angle, light.outer_cone_angle, 0, light.enabled ? 1.0f : 0.0f)
         };
 
-        renderer->allocate_light(e, l);
+        if (renderer)
+            renderer->allocate_light(e, l);
     });
 
     world.observer<Light_Component>()
     .event(flecs::OnRemove)
     .each([this](Entity e, const Light_Component& l) {
-        renderer->deallocate_light(e);
+        if (renderer)
+            renderer->deallocate_light(e);
     });
 }
 
@@ -393,7 +389,6 @@ void Scene::show_entity_inspector() {
     }
 
     ImGui::EndChild();
-
     world.defer_end();
 
     ImGui::End();
@@ -402,7 +397,7 @@ void Scene::show_entity_inspector() {
 template<typename T>
 bool Scene::display_component(Entity e, const char* name, std::function<void(T&)> ui_func) {
     if (!e.has<T>()) return false;
-
+    
     ImGuiTreeNodeFlags header_flags =
         ImGuiTreeNodeFlags_DefaultOpen |
         ImGuiTreeNodeFlags_Framed;

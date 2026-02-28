@@ -14,11 +14,6 @@
 
 using std::vector;
 
-struct Model_Handle {
-    uint32_t index;
-    bool animated;
-};
-
 struct Vertex {
     vec3 position;
     float uv_x;
@@ -57,7 +52,7 @@ struct Bone {
 namespace Model_Manager {
     mat4 assimp_to_glm(const aiMatrix4x4& ai_mat);
 
-    void init(const std::string& base);
+    void init(const std::string& base, bool headless = false);
     void cleanup();
 
     bool model_loaded(const std::string& full_path, Model_Handle& model_index);

@@ -30,7 +30,7 @@ enum class Game_State {
 	NUM_GAME_STATE
 };
 
-static Game_State game_state = Game_State::PLAYING;
+static Game_State game_state = Game_State::MAIN_MENU;
 
 void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
 	ImGuiIO& io = ImGui::GetIO();

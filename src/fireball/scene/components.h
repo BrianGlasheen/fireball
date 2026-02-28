@@ -1,6 +1,6 @@
 #pragma once
 
-#include "fireball/asset/model_manager.h"
+#include "fireball/asset/model.h"
 #include "fireball/core/physics.h"
 #include "fireball/util/math.h"
 
@@ -28,6 +28,10 @@ struct Physics_Component {
 
 struct Model_Component {
 	Model_Handle handle;
+};
+
+struct Server_Model_Component {
+	std::string model_name;
 };
 
 struct Motion {

@@ -1,15 +1,13 @@
 #pragma once
 
-#include "components.h"
 #include "entity.h"
-
-#include "fireball/renderer/vk_backend.h"
-#include "fireball/util/math.h"
 
 #include <flecs.h>
 
 #include <functional>
 #include <string>
+
+class Vk_Backend;
 
 class Scene {
 public:

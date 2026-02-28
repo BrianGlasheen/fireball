@@ -9,6 +9,11 @@
 constexpr uint32_t NUM_LODS = 6;
 constexpr float LOD_THRESHOLDS[NUM_LODS] = { 1.0f, 0.5f, 0.25f, 0.125f, 0.07f, 0.03f };
 
+struct Model_Handle {
+    uint32_t index;
+    bool animated;
+};
+
 struct Material {
 	//vec4 base_color;
 	uint32_t albedo;
