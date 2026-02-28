@@ -1,6 +1,6 @@
 #pragma once
 
-#include "scene/components.h"
+#include "components.h"
 
 #include <flecs.h>
 

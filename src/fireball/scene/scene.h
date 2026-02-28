@@ -1,9 +1,10 @@
 #pragma once
 
-#include "renderer/vk_backend.h"
-#include "scene/components.h"
-#include "scene/entity.h"
-#include "util/math.h"
+#include "components.h"
+#include "entity.h"
+
+#include "fireball/renderer/vk_backend.h"
+#include "fireball/util/math.h"
 
 #include <flecs.h>
 

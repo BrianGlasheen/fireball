@@ -1,8 +1,8 @@
-#include "asset/texture_manager.h"
+#include "texture_manager.h"
 
-#include "renderer/vk_types.h"
-#include "renderer/vk_util.h"
-#include "util/math.h"
+#include "fireball/renderer/vk_types.h"
+#include "fireball/renderer/vk_util.h"
+#include "fireball/util/math.h"
 
 #include <stb_image.h>
 #include <vulkan/vk_enum_string_helper.h>

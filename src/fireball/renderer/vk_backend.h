@@ -1,10 +1,11 @@
 #pragma once
 
-#include "asset/model_manager.h" // Vertex
-#include "renderer/vk_debug_backend.h"
-#include "renderer/vk_types.h"
-#include "scene/entity.h"
-#include "util/types.h"
+#include "vk_debug_backend.h"
+#include "vk_types.h"
+
+#include "fireball/asset/model_manager.h" // Vertex
+#include "fireball/scene/entity.h"
+#include "fireball/util/types.h"
 
 #include <vulkan/vk_enum_string_helper.h>
 #include <GLFW/glfw3.h>

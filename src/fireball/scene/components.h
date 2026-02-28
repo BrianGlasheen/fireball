@@ -1,8 +1,8 @@
 #pragma once
 
-#include "asset/model_manager.h"
-#include "core/physics.h"
-#include "util/math.h"
+#include "fireball/asset/model_manager.h"
+#include "fireball/core/physics.h"
+#include "fireball/util/math.h"
 
 #include <string>
 

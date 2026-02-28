@@ -1,8 +1,9 @@
 #pragma once
 
-#include "renderer/pipeline.h"
-#include "renderer/vk_util.h"
-#include "util/math.h"
+#include "pipeline.h"
+#include "vk_util.h"
+
+#include "fireball/util/math.h"
 
 #include <vulkan/vulkan.h>
 

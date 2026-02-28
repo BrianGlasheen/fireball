@@ -1,9 +1,10 @@
 #include "vk_backend.h"
 
-#include "asset/texture_manager.h"
-#include "renderer/pipeline.h"
-#include "renderer/vk_types.h"
-#include "renderer/vk_util.h"
+#include "pipeline.h"
+#include "vk_types.h"
+#include "vk_util.h"
+
+#include "fireball/asset/texture_manager.h"
 
 #include <VkBootstrap.h>
 #include <imgui.h>

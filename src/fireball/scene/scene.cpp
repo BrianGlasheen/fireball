@@ -1,8 +1,9 @@
-#include "scene/scene.h"
+#include "scene.h"
 
-#include "core/physics.h"
-#include "renderer/vk_backend.h"
-#include "scene/components.h"
+#include "components.h"
+
+#include "fireball/core/physics.h"
+#include "fireball/renderer/vk_backend.h"
 
 #include <imgui.h>
 

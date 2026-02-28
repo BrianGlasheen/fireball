@@ -1,5 +1,7 @@
 #pragma once
 
+#include "fireball/util/math.h"
+
 #include <string>
 #include <vector>
 #include <cstdint>

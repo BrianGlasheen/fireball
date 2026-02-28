@@ -1,7 +1,8 @@
 #pragma once
 
-#include "util/math.h"
 #include "model.h"
+
+#include "fireball/util/math.h"
 
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>

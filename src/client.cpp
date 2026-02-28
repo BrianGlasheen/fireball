@@ -1,12 +1,12 @@
-#include "camera.h"
-#include "asset/model_manager.h"
-#include "asset/texture_manager.h"
-#include "core/physics.h"
-#include "renderer/vk_util.h"
-#include "renderer/vk_backend.h"
-#include "scene/components.h"
-#include "scene/scene.h"
-#include "util/math.h"
+#include "fireball/camera.h"
+#include "fireball/asset/model_manager.h"
+#include "fireball/asset/texture_manager.h"
+#include "fireball/core/physics.h"
+#include "fireball/renderer/vk_util.h"
+#include "fireball/renderer/vk_backend.h"
+#include "fireball/scene/components.h"
+#include "fireball/scene/scene.h"
+#include "fireball/util/math.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>

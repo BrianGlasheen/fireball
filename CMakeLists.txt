@@ -18,6 +18,13 @@ file(
     "src/shaders/*.h"
 )
 
+file (
+    GLOB_RECURSE
+    FIREBALL_SOURCE_FILES
+    "src/fireball/*.h"
+    "src/fireball/*.cpp"
+)
+
 file(
     GLOB_RECURSE
     CPP_SOURCE_FILES
@@ -39,35 +46,6 @@ set(
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
-
-add_executable(
-    ${PROJECT_NAME}
-    ${CPP_SOURCE_FILES}
-    ${GLSL_SOURCE_FILES}
-    ${GLSL_HEADER_FILES}
-    ${IMGUI_SOURCES}
-)
-
-# visual studio stuff
-source_group("Shaders" FILES ${GLSL_SOURCE_FILES} ${GLSL_HEADER_FILES})
-source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${CPP_SOURCE_FILES})
-
-target_compile_definitions(
-    ${PROJECT_NAME}
-    PRIVATE 
-    GLFW_INCLUDE_NONE
-    GLM_FORCE_XYZW_ONLY
-    GLM_FORCE_QUAT_DATA_XYZW
-    GLM_FORCE_QUAT_CTOR_XYZW
-    GLM_ENABLE_EXPERIMENTAL
-)
-
-target_include_directories(
-    ${PROJECT_NAME}
-    PRIVATE
-    "external/stb"
-    "src"
-)
 
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
@@ -107,24 +85,37 @@ add_subdirectory(external/meshoptimizer)
 add_subdirectory(external/flecs)
 add_subdirectory(external/JoltPhysics/Build)
 
-target_include_directories(${PROJECT_NAME}
-    PRIVATE
+add_library(fireball STATIC
+    ${FIREBALL_SOURCE_FILES}
+    ${IMGUI_SOURCES}
+)
+
+target_compile_definitions(fireball
+    PUBLIC
+        GLFW_INCLUDE_NONE
+        GLM_FORCE_XYZW_ONLY
+        GLM_FORCE_QUAT_DATA_XYZW
+        GLM_FORCE_QUAT_CTOR_XYZW
+        GLM_ENABLE_EXPERIMENTAL
+)
+
+target_include_directories(fireball
+    PUBLIC
+        "src/fireball"
+        "src"
         "external/imgui"
         "external/imgui/backends"
         "external/JoltPhysics"
+        "external/stb"
 )
 
 if(UNIX AND NOT APPLE)
-    target_link_libraries(
-        ${PROJECT_NAME}
-        PRIVATE
-            X11 Xcursor Xrandr Xi Xinerama Xxf86vm pthread dl
-    )
+    target_link_libraries(fireball PUBLIC X11 Xcursor Xrandr Xi Xinerama Xxf86vm pthread dl)
 endif()
 
 target_link_libraries(
-    ${PROJECT_NAME} 
-    PRIVATE
+    fireball
+    PUBLIC
         Vulkan::Vulkan
         glfw
         glm
@@ -135,6 +126,14 @@ target_link_libraries(
         flecs::flecs_static
         Jolt
 )
+
+add_executable(client src/client.cpp ${GLSL_SOURCE_FILES} ${GLSL_HEADER_FILES})
+target_link_libraries(client PRIVATE fireball)
+source_group("Shaders" FILES ${GLSL_SOURCE_FILES} ${GLSL_HEADER_FILES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${FIREBALL_SOURCE_FILES})
+
+add_executable(server src/server.cpp)
+target_link_libraries(server PRIVATE fireball)
 
 find_program(GLSL_VALIDATOR glslangValidator HINTS /usr/bin /usr/local/bin $ENV{VULKAN_SDK}/Bin/ $ENV{VULKAN_SDK}/Bin32/)
 
@@ -159,4 +158,4 @@ foreach(GLSL ${GLSL_SOURCE_FILES})
 endforeach()
 
 add_custom_target(compile_shaders DEPENDS ${SPIRV_BINARY_FILES})
-add_dependencies(${PROJECT_NAME} compile_shaders)
+add_dependencies(client compile_shaders)
