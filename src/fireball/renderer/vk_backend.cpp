@@ -27,7 +27,7 @@ int Vk_Backend::init(GLFWwindow* window, uint32_t w, uint32_t h, bool validation
 	init_pipelines();
 	init_draw_buffers();
 	init_light_buffer();
-	//init_mesh_cull_descriptors();
+	init_mesh_cull_descriptors();
 	init_imgui(window);
 	debug_renderer.init(_device, _chosenGPU, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_D32_SFLOAT);
 

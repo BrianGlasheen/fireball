@@ -80,6 +80,7 @@ namespace Model_Manager {
     vector<uint32_t>& get_indices();
     vector<Model>& get_models();
     std::span<const Bone> get_model_bones(Model_Handle handle);
+    Model_Handle get_handle(const std::string& str);
     size_t get_num_vertices();
     size_t get_num_vertices(Model_Handle handle);
     size_t get_num_indices();

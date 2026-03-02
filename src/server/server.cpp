@@ -1,5 +1,7 @@
 #include "fireball/core/physics.h"
+#include "fireball/networking/server.h"
 #include "fireball/scene/components.h"
+#include "fireball/scene/serializer.h"
 #include "fireball/scene/scene.h"
 #include "fireball/util/math.h"
 #include "fireball/util/time.h"
@@ -7,13 +9,40 @@
 #include <cstdio>
 #include <cstdint>
 
-// todo server state
+struct Player {
+    HSteamNetConnection conn;
+    std::string name;
+};
+
+std::unordered_map<HSteamNetConnection, Player> g_players;
 
 int main() {
-    printf("fireball server started\n");
+    printf("fireball server starting\n");
 
+	Server server;
 	Physics::init();
 	Scene scene(nullptr);
+
+	server.on_client_joined = [&](HSteamNetConnection conn, const std::string& name) {
+        g_players[conn] = { conn, name };
+        printf("[SERVER] '%s' joined (%zu players online)\n", name.c_str(), g_players.size());
+
+        // TODO:serialize scene entity list into a snapshot buffer and send via:
+        // server.send_to(conn, { NetMsg::FullSnapshot, <scene_buffer> });
+    };
+
+    server.on_client_left = [&](HSteamNetConnection conn) {
+        auto it = g_players.find(conn);
+        if (it != g_players.end()) {
+            printf("[SERVER] '%s' left (%zu players remaining)\n",
+                   it->second.name.c_str(), g_players.size() - 1);
+            g_players.erase(it);
+        }
+    };
+
+	server.on_full_snapshot = [&]() {
+		return serialize_scene(scene.world);
+	};
 
 	Entity e2 = scene.create_entity("plane");
 	e2.get_mut<Transform_Component>().scale = vec3(100.0f);
@@ -71,7 +100,7 @@ int main() {
 
 		box.pos = tc.position;
 		Physics_Handle ph = Physics::add_object(box);
-		printf("physics id %d", ph);
+		// printf("physics id %d", ph);
 		e.set<Physics_Component>({ ph, box });
 	}
 
@@ -79,11 +108,13 @@ int main() {
     double fps_timer = 0.0;
     uint32_t fps_frames = 0;
 
-    Time last_frame = high_resolution_clock::now();
-
 	Physics::optimize_broad_phase();
+	short port = 5678;
+	server.start(port);
+	
+    Time last_frame = high_resolution_clock::now();
     while (true) {
-		auto now = high_resolution_clock::now();
+		Time now = high_resolution_clock::now();
 		dt = duration<double>(now - last_frame).count();
 		last_frame = now;
 
@@ -96,7 +127,7 @@ int main() {
 			fps_timer = 0.0;
 			fps_frames = 0;
 
-			printf("[SERVER] %.1f FPS | %.2f ms\n", fps, frame_ms);
+			// printf("[SERVER] %.1f FPS | %.2f ms\n", fps, frame_ms);
 		}
 
 		// int state = static_cast<int>(game_state);
@@ -107,8 +138,12 @@ int main() {
 		// get network 
 		Physics::update();
 		scene.update(dt);
+		server.tick();
 		// send network data
 	}
+
+	// send shutdown msg
+	server.stop();
 
 	return 0;
 }

@@ -1,5 +1,6 @@
 ﻿#include "model_manager.h"
 
+#include "asset/model.h"
 #include "texture_manager.h"
 
 #include "fireball/util/time.h"
@@ -543,6 +544,15 @@ namespace Model_Manager {
 
     std::vector<Model>& get_models() {
         return g_models;
+    }
+
+    Model_Handle get_handle(const string& str) {
+        for (size_t i = 0; i < g_models.size(); i++) {
+            if (g_models[i].name == str)
+                return Model_Handle { (uint32_t)i };
+        }
+
+        return Model_Handle { 0 };
     }
 
     std::span<const Bone> get_model_bones(Model_Handle handle) {

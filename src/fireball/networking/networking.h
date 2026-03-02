@@ -1,3 +1,5 @@
+#pragma once
+
 #include <steam/steamnetworkingsockets.h>
 #include <steam/isteamnetworkingutils.h>
 #ifndef STEAMNETWORKINGSOCKETS_OPENSOURCE
@@ -17,11 +19,6 @@
 #include <queue>
 #include <map>
 #include <cctype>
-
-// TODO network structures and settings
-struct Network_Settings {
-    float tick_rate = 1.0f / 128.0f;
-};
 
 SteamNetworkingMicroseconds g_logTimeZero;
 
@@ -61,27 +58,26 @@ static void Printf( const char *fmt, ... ) {
 }
 
 static void InitSteamDatagramConnectionSockets() {
-	#ifdef STEAMNETWORKINGSOCKETS_OPENSOURCE
-		SteamDatagramErrMsg errMsg;
-		if ( !GameNetworkingSockets_Init( nullptr, errMsg ) )
-			FatalError( "GameNetworkingSockets_Init failed.  %s", errMsg );
-	#else
-		SteamDatagram_SetAppID( 570 ); // Just set something, doesn't matter what
-		SteamDatagram_SetUniverse( false, k_EUniverseDev );
+#ifdef STEAMNETWORKINGSOCKETS_OPENSOURCE
+	SteamDatagramErrMsg errMsg;
+	if ( !GameNetworkingSockets_Init( nullptr, errMsg ) )
+		FatalError( "GameNetworkingSockets_Init failed.  %s", errMsg );
+#else
+	SteamDatagram_SetAppID( 570 ); // Just set something, doesn't matter what
+	SteamDatagram_SetUniverse( false, k_EUniverseDev );
 
-		SteamDatagramErrMsg errMsg;
-		if ( !SteamDatagramClient_Init( errMsg ) )
-			FatalError( "SteamDatagramClient_Init failed.  %s", errMsg );
+	SteamDatagramErrMsg errMsg;
+	if ( !SteamDatagramClient_Init( errMsg ) )
+		FatalError( "SteamDatagramClient_Init failed.  %s", errMsg );
 
-		// Disable authentication when running with Steam, for this
-		// example, since we're not a real app.
-		//
-		// Authentication is disabled automatically in the open-source
-		// version since we don't have a trusted third party to issue
-		// certs.
-		SteamNetworkingUtils()->SetGlobalConfigValueInt32( k_ESteamNetworkingConfig_IP_AllowWithoutAuth, 1 );
-	#endif
-
+	// Disable authentication when running with Steam, for this
+	// example, since we're not a real app.
+	//
+	// Authentication is disabled automatically in the open-source
+	// version since we don't have a trusted third party to issue
+	// certs.
+	SteamNetworkingUtils()->SetGlobalConfigValueInt32( k_ESteamNetworkingConfig_IP_AllowWithoutAuth, 1 );
+#endif
 	g_logTimeZero = SteamNetworkingUtils()->GetLocalTimestamp();
 
 	SteamNetworkingUtils()->SetDebugOutputFunction( k_ESteamNetworkingSocketsDebugOutputType_Msg, DebugOutput );

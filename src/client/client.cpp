@@ -1,15 +1,15 @@
+#include "fireball/networking/client.h" // TODO fix this has to come before any glm include i think..
+
 #include "fireball/camera.h"
 #include "fireball/asset/model_manager.h"
 #include "fireball/asset/texture_manager.h"
 #include "fireball/core/physics.h"
-#include "fireball/renderer/vk_util.h"
+#include "fireball/networking/client.h"
 #include "fireball/renderer/vk_backend.h"
 #include "fireball/scene/components.h"
+#include "fireball/scene/serializer.h"
 #include "fireball/scene/scene.h"
 #include "fireball/util/math.h"
-
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -17,13 +17,14 @@
 
 #include <cstdio>
 #include <cstdint>
-#include <vector>
 #include <span>
+#include <unordered_map>
 
 static bool g_spawn_requested = false;
 
 enum class Game_State {
 	MAIN_MENU = 0,
+	CONNECTING,
 	LOADING,
 	PLAYING,
 	PAUSE_MENU,
@@ -98,116 +99,25 @@ int main() {
 
 	Scene scene(&renderer);
 
-	// Model_Handle test = Model_Manager::load_model("CompareAlphaTest/AlphaBlendModeTest.gltf", Mesh_Opt_Flags_All);
+	// get list of entities from server
+	// get list of other players
+	// load resources as needed, for example server model is just string -> start load model
 	Model_Handle wand = Model_Manager::load_model("wand/scene.gltf");
 	Model_Handle ciri = Model_Manager::load_model("turtle/scene.gltf");
-	// Model_Handle ciri = Model_Manager::load_model("bistro/bistro.gltf");
 	Model_Handle plane = Model_Manager::load_model("plane.obj");
-	//Model_Manager::load_model("factory/scene.gltf");
-	//Model_Manager::load_model("minecraft/scene.gltf");
 	Model_Manager::wait_for_all_loads();
 	Texture_Manager::wait_for_all_loads();
 
-	Entity e2 = scene.create_entity("plane");
-	e2.get_mut<Transform_Component>().scale = vec3(100.0f);
-	e2.set<Model_Component>({ plane });
-
-	Physics_Info plane_info = {
-		.shape = Physics_Shape::Plane,
-		.pos = vec3(0.0f),
-		.orientation = quat(1.0f, 0.0f, 0.0f, 0.0f),
-		.scale = vec3(100.0f, 2.0f, 100.0f),
-	};
-
-	Physics_Info box = {
-		.shape = Physics_Shape::Box,
-		.pos = vec3(0.0f),
-		.orientation = quat(1.0f, 0.0f, 0.0f, 0.0f),
-		.scale = vec3(1.0f),
-	};
-
-	printf("hern\n");
-	Physics_Handle plane_handle = Physics::add_object(plane_info, true);
-	printf("hern\n");
-
-	e2.set<Physics_Component>({plane_handle, plane_info});
-	printf("hern2\n");
-	
-	Entity prev;
-	for (int i = 0; i < 5; i++) {
-		Entity e = scene.create_entity(std::to_string(i));
-
-		if (prev.is_alive()) {
-			e.add(flecs::ChildOf, prev);
-		}
-		//prev = e;
-
-		Transform_Component& tc = e.get_mut<Transform_Component>();
-		tc.position.y += 50 * i;
-		tc.dirty = true;
-
-		Model_Handle handle;
-		if (i % 2 == 0)
-			handle = ciri;
-		else
-			handle = wand;
-
-		auto entityName = e.get<Name_Component>().string;
-		auto modelName = Model_Manager::get_model_name(handle);
-		printf("[MAIN] adding entity %s, model %s\n", entityName.c_str(), modelName.c_str());
-
-		e.set<Model_Component>({ handle });
-
-		Light_Component l{
-			.type = Light_Component::Type::Point,
-			.color = vec3(1.0f),
-			.intensity = 10.0f,
-			.range = 100.0f,
-			//.direction
-			.inner_cone_angle = 30.0f,
-			.outer_cone_angle = 45.0f,
-			.dirty = true,
-			.enabled = true
-		};
-
-		//e.add<Motion>();
-		e.set<Light_Component>({ l });
-
-		box.pos = tc.position;
-		Physics_Handle ph = Physics::add_object(box);
-		printf("physics id %d", ph);
-		e.set<Physics_Component>({ ph, box });
-	}
-
 	renderer.upload_geometry(Model_Manager::get_indices(), Model_Manager::get_vertices());
 
-	renderer.init_mesh_cull_descriptors();
-
-	auto spawn_entity = [&](const vec3& pos) {
-		static int spawn_count = 0;
-		Entity e = scene.create_entity("spawned_" + std::to_string(spawn_count++));
-
-		Transform_Component& tc = e.get_mut<Transform_Component>();
-		tc.position = pos;
-		tc.dirty = true;
-
-		Model_Handle handle = (spawn_count % 2 == 0) ? ciri : wand;
-		e.set<Model_Component>({ handle });
-
-		Physics_Info info = {
-			.shape = Physics_Shape::Box,
-			.pos   = pos,
-			.orientation = quat(1.0f, 0.0f, 0.0f, 0.0f),
-			.scale = vec3(1.0f),
-		};
-
-		Physics_Handle ph = Physics::add_object(info, false);
-		e.set<Physics_Component>({ ph, info });
-
-		printf("[MAIN] spawned entity at (%.2f, %.2f, %.2f)\n", pos.x, pos.y, pos.z);
-	};
-
+	// create entities from list that server has
+	std::unordered_map<uint64_t, Entity> id_map;
+	
 	Camera camera;
+	Client client;
+	client.on_snapshot = [&](const uint8_t* data , size_t bytes) {
+		deserialize_scene(scene, data, bytes, id_map);
+    };
 
 	double dt;
 	double last_frame = 0.0;
@@ -268,61 +178,75 @@ int main() {
 			game_state = static_cast<Game_State>(state);
 		}
 
-	static char ip_buffer[64] = "127.0.0.1";
-	static int port = 7777;
-	static float fake_loading_progress = 0.0f;
+		static char ip_buffer[64] = "127.0.0.1";
+		static int port = 5678;
+		static float fake_loading_progress = 0.0f;
+		static char name[16] = "client";
 
-	if (game_state == Game_State::MAIN_MENU) {
-    	ImGui::Begin("Main Menu", nullptr,
-			ImGuiWindowFlags_NoResize |
-			ImGuiWindowFlags_NoCollapse |
-			ImGuiWindowFlags_AlwaysAutoResize);
+		client.tick();
+		// check data from client to set game state
 
-		ImGui::Text("Connect to Server");
-		ImGui::Separator();
+		if (game_state == Game_State::MAIN_MENU) {
+			ImGui::Begin("Main Menu", nullptr,
+				ImGuiWindowFlags_NoResize |
+				ImGuiWindowFlags_NoCollapse |
+				ImGuiWindowFlags_AlwaysAutoResize);
 
-		ImGui::InputText("IP Address", ip_buffer, IM_ARRAYSIZE(ip_buffer));
-		ImGui::InputInt("Port", &port);
+			ImGui::Text("Connect to Server");
+			ImGui::Separator();
 
-		if (ImGui::Button("Connect")) {
-			// read network
+			ImGui::InputText("IP Address", ip_buffer, IM_ARRAYSIZE(ip_buffer));
+			ImGui::InputInt("Port", &port);
+			ImGui::InputText("Name", name, IM_ARRAYSIZE(name));
+
+			if (ImGui::Button("Connect")) {
+				// read network
+				fake_loading_progress = 0.0f;
+				client.connect(ip_buffer, port, name);
+				// try to connect to server
+				// set state to connecting
+				game_state = Game_State::PLAYING;
+			}
+
+			ImGui::SameLine();
+
+			if (ImGui::Button("Quit")) {
+			}
+
+			ImGui::End();
+
+			renderer.draw_blank(vec4(0.4f, 0.7f, 0.2f, 1.0f));
+		}
+		else if (game_state == Game_State::LOADING) {
+			// poll server
+			// parse data
+			// do what's needed with said data
+			// update display / log
+			// if done loading change state 
+
+			fake_loading_progress += 0.005f;
+			if (fake_loading_progress >= 1.0f) {
+				fake_loading_progress = 1.0f;
+				game_state = Game_State::PLAYING;
+			}
+
+			ImGui::Begin("Loading...", nullptr,
+				ImGuiWindowFlags_NoResize |
+				ImGuiWindowFlags_NoCollapse |
+				ImGuiWindowFlags_AlwaysAutoResize);
+
+			ImGui::Text("Connecting to server...");
+			ImGui::ProgressBar(fake_loading_progress, ImVec2(300, 0));
+
+			if (ImGui::Button("Cancel"))
+				game_state = Game_State::MAIN_MENU;
+
+			ImGui::End();
+
+			renderer.draw_blank(vec4(0.4f, 0.2f, 0.7f, 1.0f));
+		}
+		else if (game_state == Game_State::PLAYING) {
 			fake_loading_progress = 0.0f;
-			game_state = Game_State::LOADING;
-		}
-
-		ImGui::SameLine();
-
-		if (ImGui::Button("Quit")) {
-		}
-
-		ImGui::End();
-
-		renderer.draw_blank(vec4(0.4f, 0.7f, 0.2f, 1.0f));
-	}
-	else if (game_state == Game_State::LOADING) {
-		fake_loading_progress += 0.001f;
-		if (fake_loading_progress >= 1.0f) {
-			fake_loading_progress = 1.0f;
-			game_state = Game_State::PLAYING;
-		}
-
-		ImGui::Begin("Loading...", nullptr,
-			ImGuiWindowFlags_NoResize |
-			ImGuiWindowFlags_NoCollapse |
-			ImGuiWindowFlags_AlwaysAutoResize);
-
-		ImGui::Text("Connecting to server...");
-		ImGui::ProgressBar(fake_loading_progress, ImVec2(300, 0));
-
-		if (ImGui::Button("Cancel"))
-			game_state = Game_State::MAIN_MENU;
-
-		ImGui::End();
-
-		renderer.draw_blank(vec4(0.4f, 0.2f, 0.7f, 1.0f));
-	}
-	else if (game_state == Game_State::PLAYING) {
-		fake_loading_progress = 0.0f;
 
 		// TODO stuff code in some corner
 		scene.world.query<Light_Component>()
@@ -420,12 +344,20 @@ int main() {
 				camera.move(window, dt);
 			}
 
+			// pull network data if exists
+			// reconcile diffs if large
+			// if good, keep predicting / interpolating with current info
+			// poll input / requests
+			// queue in net buffer
+			// if tick send update, or just send, tbd
+			// if disconnect send message and cleanup for main menu
+
 			Physics::update();
 
 			if (g_spawn_requested) {
 				g_spawn_requested = false;
 				vec3 spawn_pos = camera.position + camera.front * 5.0f;
-				spawn_entity(spawn_pos);
+				// spawn_entity(spawn_pos);
 			}
 
 			scene.update(dt);
@@ -446,6 +378,9 @@ int main() {
 			ImGui::RenderPlatformWindowsDefault();
 		}
     }
+
+	// if (client.connected)
+	client.disconnect();
 
 	renderer.cleanup();
 	// Physics::shutdown(); // ??

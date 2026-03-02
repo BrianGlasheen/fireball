@@ -1,6 +1,4 @@
 build
-
 dependencies for building
-vulkan-devel, for VVL
-libssl-dev, GNS
-protobuf, GNS
+vulkan-devel package or lunarg vulkan sdk, for VVL
+libssl-dev & protobuf, for game networking sockets
