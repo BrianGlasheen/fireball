@@ -15,12 +15,17 @@ struct Client_Hello {
     char name[32];
 };
 
+struct Server_Shutdown {
+    char text[1024];
+};
+
 enum class NetMsg : uint8_t {
     // Server -> Client
     FullSnapshot    = 1,
     DeltaUpdate     = 2,
     EntityDestroyed = 3,
     ClientAccepted  = 4,
+    ServerShutdown = 5,
 
     // Client -> Server
     ClientHello     = 10,

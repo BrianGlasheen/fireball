@@ -50,10 +50,14 @@ public:
         return true;
     }
 
+    // TODO make work
     void stop() {
         for (auto& [conn, state] : m_clients) {
-            send_packet(conn, { NetMsg::ClientLeaving, {} });
-            m_sockets->CloseConnection(conn, 0, "Server shutdown, reason", true);
+            Server_Shutdown shutdown {
+                .text = "Server shutdown, reason 12345"
+            };
+            send_packet(conn, NetPacket::from(NetMsg::ServerShutdown,  shutdown));
+            m_sockets->CloseConnection(conn, 0, "Server shutdown", true);
         }
 
         m_clients.clear();
@@ -129,7 +133,7 @@ private:
                 auto& state = m_clients[conn];
                 state.name = std::string(msg.name);
 
-                Client_Accepted sinfo { .server_name = "fireball-server", .your_id = conn, .tick_rate = 128 };
+                Client_Accepted sinfo { .server_name = "fireball-server", .your_id = conn, .tick_rate = 128 }; // todo change tickrate to setting
                 NetPacket packet = NetPacket::from(NetMsg::ClientAccepted, sinfo);
                 send_packet(conn, packet, k_nSteamNetworkingSend_Reliable);
 

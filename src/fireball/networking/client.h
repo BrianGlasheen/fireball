@@ -101,7 +101,21 @@ private:
             case NetMsg::ClientLeaving:
                 printf("[CLIENT] Server is shutting down\n");
                 if (on_disconnected) on_disconnected();
+                break;            
+                
+            case NetMsg::ServerShutdown: {
+                Server_Shutdown s;
+                int fail = NetPacket::to(pkt, s);
+                s.text[sizeof(s.text) - 1] = '\0';
+                
+                if (fail)
+                    printf("Server is shutting down\nUnknown reason\n");
+                else
+                    printf("Server is shutting down\n%s", s.text);
+
+                if (on_disconnected) on_disconnected();
                 break;
+            }
 
             default:
                 printf("[CLIENT] Unknown msg type %d\n", (int)pkt.type);

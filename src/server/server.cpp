@@ -8,6 +8,10 @@
 
 #include <cstdio>
 #include <cstdint>
+#include <iostream>
+#include <thread>
+
+bool running = true;
 
 struct Player {
     HSteamNetConnection conn;
@@ -109,11 +113,26 @@ int main() {
     uint32_t fps_frames = 0;
 
 	Physics::optimize_broad_phase();
+
+	std::thread console_thread([]() {
+		std::string input;
+
+		while (running) {
+			std::getline(std::cin, input);
+
+			if (input == "q" || input == "quit") {
+				printf("[SERVER] Shutdown requested...\n");
+				running = false;
+				break;
+			}
+		}
+	});
+
 	short port = 5678;
 	server.start(port);
 	
     Time last_frame = high_resolution_clock::now();
-    while (true) {
+    while (running) {
 		Time now = high_resolution_clock::now();
 		dt = duration<double>(now - last_frame).count();
 		last_frame = now;
@@ -142,8 +161,15 @@ int main() {
 		// send network data
 	}
 
-	// send shutdown msg
+	printf("[SERVER] Shutting down...\n");
+
 	server.stop();
+	// Physics::shutdown();
+
+	if (console_thread.joinable())
+		console_thread.join();
+
+	printf("[SERVER] Shutdown\n");
 
 	return 0;
 }
