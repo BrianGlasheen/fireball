@@ -126,6 +126,9 @@ namespace Texture_Manager {
 	// TODO probably change so this returns handle to texture instead of just
 	// the bindless id, at some point
 	uint32_t load(const std::string& file_path) {
+		if (!file_path.ends_with("png")) 
+			return textures["missing"].bindless_id;
+
 		texture_mutex.lock();
 			auto it = textures.find(file_path);
 			if (it != textures.end()) {

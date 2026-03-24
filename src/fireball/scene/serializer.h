@@ -223,7 +223,7 @@ static bool apply_component(Entity e, NetComponentID id, ByteReader& r) {
         case NetComponentID::ServerModel: {
             Server_Model_Component m;
             if (!deserialize(r, m)) return false;
-            e.set<Model_Component>({ Model_Manager::get_handle(m.model_name) });
+            e.set<Model_Component>({ Model_Manager::load_model(m.model_name) });
             return true;
         }
         case NetComponentID::Light: {

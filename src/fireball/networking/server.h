@@ -19,6 +19,9 @@ struct ClientState {
 
 class Server {
 public:
+    // todo change to virtual functions with force override?
+    // virtual f() = 0; for core functions that require implementation
+    // can leave non core stuff optional, i.e. chat, voice, etc.
     std::function<std::vector<uint8_t>()> on_full_snapshot;
     std::function<std::vector<uint8_t>()> on_delta_update; 
     std::function<void(HSteamNetConnection, const std::string&)> on_client_joined;
@@ -35,8 +38,7 @@ public:
         addr.m_port = port;
 
         SteamNetworkingConfigValue_t opt;
-        opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged,
-                   (void*)connection_status_changed_static);
+        opt.SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, (void*)connection_status_changed_static);
 
         m_listen_socket = m_sockets->CreateListenSocketIP(addr, 1, &opt);
         if (m_listen_socket == k_HSteamListenSocket_Invalid) {
@@ -63,6 +65,7 @@ public:
         m_clients.clear();
         m_sockets->CloseListenSocket(m_listen_socket);
         m_sockets->DestroyPollGroup(m_poll_group);
+        ShutdownSteamDatagramConnectionSockets();
     }
 
     void tick() {

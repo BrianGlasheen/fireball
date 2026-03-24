@@ -114,7 +114,7 @@ namespace Model_Manager {
             handle.index = g_models.size();
             Model model;
             model.name = path;
-            model.state = Loading_State::Loading;
+            model.loading_state = Loading_State::Loading;
             
             g_models.push_back(model);
         model_mutex.unlock();
@@ -167,7 +167,7 @@ namespace Model_Manager {
 
         model_mutex.lock();
             g_models[handle.index].meshes = meshes;
-            g_models[handle.index].state = Loading_State::Loaded;
+            g_models[handle.index].loading_state = Loading_State::Loaded;
         model_mutex.unlock();
 
         double elapsed = duration_cast<milliseconds>(high_resolution_clock::now() - start_time).count();
@@ -531,7 +531,7 @@ namespace Model_Manager {
         loading_threads.clear();
 
         for (const Model& model : g_models)
-            assert(model.state == Loading_State::Loaded);
+            assert(model.loading_state == Loading_State::Loaded);
     }
 
     std::vector<Vertex>& get_vertices() {

@@ -83,7 +83,7 @@ enum class Loading_State {
 struct Model {
 	std::string name;
 	std::vector<Mesh> meshes;
-	Loading_State state;
+	Loading_State loading_state;
 	// transform
 	// aabb / bs
 };

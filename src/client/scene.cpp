@@ -73,27 +73,38 @@ Scene::Scene(Vk_Backend* _renderer) {
 #ifdef FIREBALL_CLIENT
     world.system<Model_Component>()
     .kind(flecs::OnUpdate)
-    .each([this](Entity e, Model_Component& m) {
+    .each([this](Entity e, Model_Component& mc) {
         if (e.get<Transform_Component>().updated) {
-            if (renderer)
-                renderer->update_meshes(e, m.handle);
-                // if materials new then update
-                // mesh flags change (shadows, invisible)
+            Model& m = Model_Manager::get_model(mc.handle);
+            // update meshes returns 0 if mesh updated, 1 if
+            // mesh not allocated, means we werent loaded when set
+            // if we are loaded now lets allocate
+            if (renderer->update_meshes(e, mc.handle) && m.loading_state == Loading_State::Loaded)
+                renderer->allocate_model(e, mc.handle);
+
+            // if materials new then update
+            // mesh flags change (shadows, invisible, MOVEDTHISFRAME!!)
         }
     });
     
     world.observer<Model_Component>()
     .event(flecs::OnSet)
-    .each([this](Entity e, Model_Component& model) {
-        if (renderer)
-            renderer->allocate_model(e, model.handle);
+    .each([this](Entity e, Model_Component& mc) {
+        // TODO model might not be loaded. check if loaded, if so load, if not not
+        if (Model_Manager::get_model(mc.handle).loading_state == Loading_State::Loaded)        
+            renderer->allocate_model(e, mc.handle);
     });
 
     world.observer<Model_Component>()
     .event(flecs::OnRemove)
     .each([this](Entity e, const Model_Component& model) {
-        if (renderer)
-            renderer->deallocate_model(e);
+        renderer->deallocate_model(e);
+
+        // todo check loaded? 
+        // potential add model -> remove before loaded?
+
+        // TODO update ref counting stuff for model
+        // dealloc?
     });
 
     world.system<Light_Component>()
@@ -107,9 +118,7 @@ Scene::Scene(Vk_Backend* _renderer) {
                 .params = vec4(light.inner_cone_angle, light.outer_cone_angle, 0, light.enabled ? 1.0f : 0.0f)
             };
 
-            if (renderer)
-                renderer->update_light(e, l);
-            
+            renderer->update_light(e, l);
             //printf("updated light\n");
         }
     });
@@ -125,15 +134,13 @@ Scene::Scene(Vk_Backend* _renderer) {
             .params = vec4(light.inner_cone_angle, light.outer_cone_angle, 0, light.enabled ? 1.0f : 0.0f)
         };
 
-        if (renderer)
-            renderer->allocate_light(e, l);
+        renderer->allocate_light(e, l);
     });
 
     world.observer<Light_Component>()
     .event(flecs::OnRemove)
     .each([this](Entity e, const Light_Component& l) {
-        if (renderer)
-            renderer->deallocate_light(e);
+        renderer->deallocate_light(e);
     });
 #endif
 }

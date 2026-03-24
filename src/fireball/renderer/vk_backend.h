@@ -141,7 +141,7 @@ public:
 
 	void upload_geometry(std::span<uint32_t> indices, std::span<Vertex> vertices);
 	void allocate_model(Entity e, Model_Handle handle);
-	void update_meshes(Entity e, Model_Handle handle);
+	int update_meshes(Entity e, Model_Handle handle);
 	void deallocate_model(Entity e);
 	void allocate_light(Entity e, GPU_Light light);
 	void update_light(Entity e, GPU_Light light);

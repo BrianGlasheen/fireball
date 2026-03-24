@@ -99,12 +99,9 @@ int main() {
 
 	Scene scene(&renderer);
 
-	// get list of entities from server
-	// get list of other players
-	// load resources as needed, for example server model is just string -> start load model
-	Model_Handle wand = Model_Manager::load_model("wand/scene.gltf");
-	Model_Handle ciri = Model_Manager::load_model("turtle/scene.gltf");
-	Model_Handle plane = Model_Manager::load_model("plane.obj");
+	Model_Manager::load_model("drag/scene.gltf");
+	// Model_Manager::load_model("911/scene.gltf");
+	
 	Model_Manager::wait_for_all_loads();
 	Texture_Manager::wait_for_all_loads();
 

@@ -1092,10 +1092,11 @@ void Vk_Backend::allocate_model(Entity e, Model_Handle handle) {
 	destroy_buffer(staging);
 }
 
-void Vk_Backend::update_meshes(Entity e, Model_Handle handle) {
+int Vk_Backend::update_meshes(Entity e, Model_Handle handle) {
 	auto it = mesh_allocations.find(e);
 	if (it == mesh_allocations.end()) {
-		return;
+		printf("Cannot update model %s not yet loaded\n", Model_Manager::get_model_name(handle).c_str());
+		return 1;
 	}
 
 	const Range_Allocation& alloc = it->second;
@@ -1114,6 +1115,8 @@ void Vk_Backend::update_meshes(Entity e, Model_Handle handle) {
 	}
 
 	update_buffer_range(transform_buffer, sizeof(mat4), alloc.base, transforms.data(), alloc.count);
+
+	return 0;
 }
 
 void Vk_Backend::deallocate_model(Entity e) {

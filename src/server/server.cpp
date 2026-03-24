@@ -48,9 +48,9 @@ int main() {
 		return serialize_scene(scene.world);
 	};
 
-	Entity e2 = scene.create_entity("plane");
-	e2.get_mut<Transform_Component>().scale = vec3(100.0f);
-	e2.set<Server_Model_Component>({ "plane.obj" });
+	// Entity e2 = scene.create_entity("plane");
+	// e2.get_mut<Transform_Component>().scale = vec3(100.0f);
+	// e2.set<Server_Model_Component>({ "plane.obj" });
 
 	Physics_Info plane_info = {
 		.shape = Physics_Shape::Plane,
@@ -66,47 +66,40 @@ int main() {
 		.scale = vec3(1.0f),
 	};
 
-	Physics_Handle plane_handle = Physics::add_object(plane_info, true);
-	e2.set<Physics_Component>({plane_handle, plane_info});
+	// Physics_Handle plane_handle = Physics::add_object(plane_info, true);
+	// e2.set<Physics_Component>({plane_handle, plane_info});
 	
-	Entity prev;
-	for (int i = 0; i < 5; i++) {
-		Entity e = scene.create_entity(std::to_string(i));
+	// Entity square = scene.create_entity("emsqr");
+	// square.set<Server_Model_Component>({ "emeraldsquare/EmeraldSquare_Day.fbx" });
 
-		if (prev.is_alive()) {
-			e.add(flecs::ChildOf, prev);
-		}
-		//prev = e;
+	Entity drag = scene.create_entity("dragon/scene.gltf");
+	drag.set<Server_Model_Component>({ "drag/scene.gltf" });
+	Transform_Component& tc = drag.get_mut<Transform_Component>();
+	tc.position = vec3(15, 0, 0);
+	tc.dirty = true;
+	
+	// Entity car = scene.create_entity("911");
+	// car.set<Server_Model_Component>({ "911/scene.gltf" });
+	// Transform_Component& tc2 = car.get_mut<Transform_Component>();
+	// tc2.position = vec3(0, 10, -10);
+	// tc2.dirty = true;
 
-		Transform_Component& tc = e.get_mut<Transform_Component>();
-		tc.position.y += 50 * i;
-		tc.dirty = true;
+	// Light_Component l{
+	// 	.type = Light_Component::Type::Point,
+	// 	.color = vec3(1.0f),
+	// 	.intensity = 10.0f,
+	// 	.range = 100.0f,
+	// 	//.direction
+	// 	.inner_cone_angle = 30.0f,
+	// 	.outer_cone_angle = 45.0f,
+	// 	.dirty = true,
+	// 	.enabled = true
+	// };
+	// e.set<Light_Component>({ l });
 
-		if (i % 2 == 0)
-			e.set<Server_Model_Component>({ "ciri/scene.gltf" });
-		else
-			e.set<Server_Model_Component>({ "wand/scene.gltf" });
-
-		Light_Component l{
-			.type = Light_Component::Type::Point,
-			.color = vec3(1.0f),
-			.intensity = 10.0f,
-			.range = 100.0f,
-			//.direction
-			.inner_cone_angle = 30.0f,
-			.outer_cone_angle = 45.0f,
-			.dirty = true,
-			.enabled = true
-		};
-
-		//e.add<Motion>();
-		e.set<Light_Component>({ l });
-
-		box.pos = tc.position;
-		Physics_Handle ph = Physics::add_object(box);
-		// printf("physics id %d", ph);
-		e.set<Physics_Component>({ ph, box });
-	}
+	// box.pos = tc.position;
+	// Physics_Handle ph = Physics::add_object(box);
+	// e.set<Physics_Component>({ ph, box });
 
     double dt = 0.0;
     double fps_timer = 0.0;
