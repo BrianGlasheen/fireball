@@ -19,7 +19,7 @@ struct Server_Shutdown {
     char text[1024];
 };
 
-enum class NetMsg : uint8_t {
+enum class Net_Msg : uint8_t {
     // Server -> Client
     FullSnapshot    = 1,
     DeltaUpdate     = 2,
@@ -34,7 +34,7 @@ enum class NetMsg : uint8_t {
 };
 
 struct NetPacket {
-    NetMsg  type;
+    Net_Msg type;
     std::vector<uint8_t> payload;
 
     std::vector<uint8_t> serialize() const {
@@ -49,7 +49,7 @@ struct NetPacket {
 
     static bool deserialize(const uint8_t* data, size_t size, NetPacket& out) {
         if (size < 5) return false;
-        out.type = static_cast<NetMsg>(data[0]);
+        out.type = static_cast<Net_Msg>(data[0]);
         uint32_t len;
         memcpy(&len, data + 1, 4);
         if (size < 5 + len) return false;
@@ -60,7 +60,7 @@ struct NetPacket {
     // simple serialization of single, constant sized,
     // structs based on msg type
     template<typename T>
-    static NetPacket from(NetMsg type, const T& s) {
+    static NetPacket from(Net_Msg type, const T& s) {
         std::vector<uint8_t> payload(sizeof(T));
         memcpy(payload.data(), &s, sizeof(T));
         return { type, payload };

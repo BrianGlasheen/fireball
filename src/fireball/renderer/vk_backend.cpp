@@ -12,6 +12,8 @@
 #include <imgui_impl_vulkan.h>
 #include <vulkan/vulkan_core.h>
 
+#include <queue>
+
 int Vk_Backend::init(GLFWwindow* window, uint32_t w, uint32_t h, bool validation_layers) {
 	if (init_vulkan(window, validation_layers))
 		return 1;
@@ -287,7 +289,7 @@ void Vk_Backend::init_commands() {
 }
 
 void Vk_Backend::init_descriptors() {
-	std::vector<DescriptorAllocator::PoolSizeRatio> sizes = {
+	vector<DescriptorAllocator::PoolSizeRatio> sizes = {
 		{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
 		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 7 },
 	};
@@ -311,7 +313,7 @@ void Vk_Backend::init_descriptors() {
 
 	for (int i = 0; i < FRAME_OVERLAP; i++) {
 		// create a descriptor pool
-		std::vector<DescriptorAllocatorGrowable::PoolSizeRatio> frame_sizes = {
+		vector<DescriptorAllocatorGrowable::PoolSizeRatio> frame_sizes = {
 			{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 },
 		};
 
@@ -533,7 +535,7 @@ void Vk_Backend::init_draw_pipeline() {
 }
 
 void Vk_Backend::init_mesh_cull_pipeline() {
-	std::vector<VkDescriptorSetLayoutBinding> bindings;
+	vector<VkDescriptorSetLayoutBinding> bindings;
 
 	bindings.push_back({
 		.binding = 0,
@@ -643,7 +645,7 @@ void Vk_Backend::init_mesh_cull_descriptors() {
 
 	VK_CHECK(vkAllocateDescriptorSets(_device, &allocInfo, &mesh_cull_descriptor_set));
 
-	std::vector<VkWriteDescriptorSet> writes;
+	vector<VkWriteDescriptorSet> writes;
 
 	VkDescriptorBufferInfo opaqueCommandsInfo{};
 	opaqueCommandsInfo.buffer = opaque_command_buffer.buffer;
@@ -835,32 +837,79 @@ void Vk_Backend::init_imgui(GLFWwindow* window) {
 	ImGui_ImplVulkan_Init(&init_info);
 }
 
+static Resource_State derive_state(const Render_Graph_Node& node, const Resource_Access& access) {
+	bool write = access.access_type != Access_Type::Read;
+
+	if (node.pass_type == Pass_Type::Compute) {
+		return {
+			// VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+			write ? VK_ACCESS_2_SHADER_WRITE_BIT : VK_ACCESS_2_SHADER_READ_BIT
+		};
+	} else {
+		return {
+			// VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+			write ? VK_ACCESS_2_SHADER_WRITE_BIT : VK_ACCESS_2_SHADER_READ_BIT
+		};
+	}
+}
+
 void Vk_Backend::init_render_graph() {
-	//Render_Graph_Node& rgn = render_graph.emplace_back();
-	//rgn.name = "generate_draw_commands";
-	//rgn.execute = [this](VkCommandBuffer cmd) {
-	//	generate_draw_commands(cmd);
-	//};
+	// string name;
+    // Pass_Type pass_type;
 
-	// TODO ideally all resource transitions (if not using unified layout)
-	// are handled automatically by graph, so execute is simply a single function
-	// call where resources are available and in the correct format/
-	// Consuming the graph involves proper barriers then calling execute
+	// Access_Type access_type;
+	// Allocated_Buffer buffer;
+	// std::string depends_on;
+	// vector<Resource_Access> resource_accesses;
+    
+	// VkPipeline pipeline;
+    // std::function<void(VkCommandBuffer)> execute;
 
-	render_graph.push_back(
-		Render_Graph_Node{
-			.name = "draw_background",
-			.execute = [this](VkCommandBuffer cmd) {
-				draw_background(cmd);
-			}
-		}
-	);
+    // vector<VkBufferMemoryBarrier> barriers;
+	// vector<uint32_t> depends_on;
+	using enum Pass_Type;
+	using enum Access_Type;
 
 	render_graph.push_back(
 		Render_Graph_Node{
 			.name = "generate_draw_commands",
+			.pass_type = Compute,
+			.resource_accesses = {{
+				.access_type = Write,
+				.buffer = command_count_buffer,
+				.depends_on = ""
+			}, {
+				.access_type = Write,
+				.buffer = opaque_command_buffer,
+				.depends_on = ""
+			}, {
+				.access_type = Write,
+				.buffer = transparent_command_buffer,
+				.depends_on = ""
+			}, {
+				.access_type = Read,
+				.buffer = mesh_buffer,
+				.depends_on = ""
+			}, {
+				.access_type = Read,
+				.buffer = mesh_render_info_buffer,
+				.depends_on = ""
+			}, {
+				.access_type = Read,
+				.buffer = transform_buffer,
+				.depends_on = ""
+			}, {
+				.access_type = Read,
+				.buffer = material_buffer,
+				.depends_on = ""
+			}},
+			.pipeline = mesh_cull_pipeline,
 			.execute = [this](VkCommandBuffer cmd) {
 				generate_draw_commands(cmd);
+
+				// TODO move to transitiion pass or something else idk
+				transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+				transition_image(cmd, _depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 			}
 		}
 	);
@@ -868,45 +917,141 @@ void Vk_Backend::init_render_graph() {
 	render_graph.push_back(
 		Render_Graph_Node{
 			.name = "draw_geometry",
+			.pass_type = Graphics,
+			.resource_accesses = {{
+				.access_type = Read,
+				.buffer = opaque_command_buffer,
+				.depends_on = "generate_draw_commands"
+			}, {
+				.access_type = Read,
+				.buffer = transparent_command_buffer,
+				.depends_on = "generate_draw_commands"
+			}, {
+				.access_type = Read,
+				.buffer = command_count_buffer,
+				.depends_on = "generate_draw_commands"
+			}},
+			.pipeline = opaque_pipeline,
 			.execute = [this](VkCommandBuffer cmd) {
-				transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-				transition_image(cmd, _depthImage.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+				VkDescriptorSet _bindlessDescriptorSet = Texture_Manager::get_bindless_descriptor_set();
+				vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw_pipeline_layout, 0, 1, &_bindlessDescriptorSet, 0, nullptr);
+
+				gpu_push_constants.projection = frame_proj;
+				gpu_push_constants.view = frame_view;
+				gpu_push_constants.max_lights = num_lights;
+				vkCmdPushConstants(cmd, draw_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(GPU_Push_Constants), &gpu_push_constants);
+
+				vkCmdBindIndexBuffer(cmd, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
+				/////////////// todo move all this ^
 
 				draw_geometry(cmd, frame_proj, frame_view);
 			}
 		}
 	);
 
-	render_graph.push_back(
-		Render_Graph_Node{
-			.name = "draw_debug",
-				.execute = [this](VkCommandBuffer cmd) {
-					VkRenderingAttachmentInfo colorAttachment = attachment_info(
-						_drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-					VkRenderingAttachmentInfo depthAttachment = depth_attachment_info(
-						_depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+	// possible validation checks
 
-					VkRenderingInfo renderInfo = rendering_info(_drawExtent, &colorAttachment, &depthAttachment);
-					vkCmdBeginRendering(cmd, &renderInfo);
+	// timer
+    uint32_t n = render_graph.size();
 
-					debug_renderer.render(cmd, frame_proj * frame_view);
+    // build name->index map
+    std::unordered_map<std::string, uint32_t> name_to_index;
+    for (uint32_t i = 0; i < n; i++)
+        name_to_index[render_graph[i].name] = i;
 
-					vkCmdEndRendering(cmd);
-			}
-		}
-	);
+    // build adjacency: for each node, which nodes must come before it
+    // edge: predecessor -> this node
+    vector<vector<uint32_t>> predecessors(n);
+    vector<uint32_t> in_degree(n, 0);
 
-	render_graph.push_back(
-		Render_Graph_Node{
-			.name = "copy_to_swapchain",
-			.execute = [this](VkCommandBuffer cmd) {
-				transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-				transition_image(cmd, _swapchainImages[current_swapchain_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    for (uint32_t i = 0; i < n; i++) {
+        std::unordered_set<uint32_t> seen; // dedup if same node named twice
+        for (auto& access : render_graph[i].resource_accesses) {
+            if (access.depends_on.empty()) continue;
 
-				copy_image_to_image(cmd, _drawImage.image, _swapchainImages[current_swapchain_index], _drawExtent, _swapchainExtent);
-			}
-		}
-	);
+            auto it = name_to_index.find(access.depends_on);
+            assert(it != name_to_index.end() && "depends_on names unknown node");
+
+            uint32_t pred = it->second;
+            if (seen.insert(pred).second) {
+                predecessors[i].push_back(pred);
+                in_degree[i]++;
+            }
+        }
+    }
+
+    // Kahn's algorithm
+    std::queue<uint32_t> ready;
+    for (uint32_t i = 0; i < n; i++)
+        if (in_degree[i] == 0) ready.push(i);
+
+    vector<uint32_t> sorted;
+    sorted.reserve(n);
+
+    while (!ready.empty()) {
+        uint32_t idx = ready.front(); ready.pop();
+        sorted.push_back(idx);
+
+        // find all nodes that have idx as a predecessor
+        for (uint32_t j = 0; j < n; j++) {
+            for (uint32_t pred : predecessors[j]) {
+                if (pred == idx) {
+                    if (--in_degree[j] == 0)
+                        ready.push(j);
+                    break;
+                }
+            }
+        }
+    }
+
+    assert(sorted.size() == n && "cycle in render graph");
+
+    vector<Render_Graph_Node> sorted_graph;
+    sorted_graph.reserve(n);
+    for (uint32_t idx : sorted)
+        sorted_graph.push_back(std::move(render_graph[idx]));
+    render_graph = std::move(sorted_graph);
+
+    std::unordered_map<VkBuffer, Resource_State> resource_states;
+
+    for (Render_Graph_Node& node : render_graph) {
+        node.barriers.clear();
+
+        for (auto& access : node.resource_accesses) {
+            if (access.buffer.buffer == VK_NULL_HANDLE) continue;
+
+            Resource_State dst = derive_state(node, access);
+            auto it = resource_states.find(access.buffer.buffer);
+
+            if (it == resource_states.end()) {
+                resource_states[access.buffer.buffer] = dst;
+                continue;
+            }
+
+            Resource_State& src = it->second;
+
+            if (access.access_type == Access_Type::Read && src.access == VK_ACCESS_2_SHADER_READ_BIT) {
+				printf("[RENDERER] WARNING read->read dependency in render graph\n");
+                continue;
+            }
+
+            VkBufferMemoryBarrier2 b{
+				.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+				.srcStageMask = src.stage,
+				.srcAccessMask = src.access,
+				.dstStageMask = dst.stage,
+				.dstAccessMask = dst.access,
+				.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+				.buffer = access.buffer.buffer,
+				.offset = 0,
+				.size = VK_WHOLE_SIZE
+			};
+
+            node.barriers.push_back(b);
+            it->second = dst;
+        }
+    }
 }
 
 void Vk_Backend::upload_geometry(std::span<uint32_t> indices, std::span<Vertex> vertices) {
@@ -973,10 +1118,10 @@ void Vk_Backend::allocate_model(Entity e, Model_Handle handle) {
 
 	printf("[ALLOC] Alloc range: base=%u, count=%u\n", alloc.base, alloc.count);
 
-	std::vector<mat4> transforms;
-	std::vector<GPU_Material> materials;
-	std::vector<GPU_Mesh_Render_Info> render_infos;
-	std::vector<GPU_Mesh> meshes;
+	vector<mat4> transforms;
+	vector<GPU_Material> materials;
+	vector<GPU_Mesh_Render_Info> render_infos;
+	vector<GPU_Mesh> meshes;
 
 	transforms.reserve(mesh_count);
 	materials.reserve(mesh_count);
@@ -1104,7 +1249,7 @@ int Vk_Backend::update_meshes(Entity e, Model_Handle handle) {
 
 	mat4 entity_transform = e.get<Transform_Component>().world_transform;
 
-	std::vector<mat4> transforms;
+	vector<mat4> transforms;
 	transforms.reserve(alloc.count);
 
 	for (uint32_t i = 0; i < alloc.count; i++) {
@@ -1315,10 +1460,12 @@ void Vk_Backend::draw_blank(vec4 color) {
 
 	VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
 
-	for (const Render_Graph_Node& rgn : render_graph) {
-		if (rgn.name == "draw_background" || rgn.name == "copy_to_swapchain")
-			rgn.execute(cmd);
-	}
+	clear(cmd);
+
+	transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	transition_image(cmd, _swapchainImages[current_swapchain_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+	copy_image_to_image(cmd, _drawImage.image, _swapchainImages[current_swapchain_index], _drawExtent, _swapchainExtent);
 }
 
 
@@ -1328,8 +1475,60 @@ void Vk_Backend::render(const mat4& projection, const mat4& view) {
 
 	VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
 
-	for (const Render_Graph_Node& rgn : render_graph)
+	clear(cmd);
+
+	// move all this setup
+	VkRenderingAttachmentInfo colorAttachment = attachment_info(_drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	VkRenderingAttachmentInfo depthAttachment = depth_attachment_info(_depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+
+	VkRenderingInfo renderInfo = rendering_info(_drawExtent, &colorAttachment, &depthAttachment);
+	vkCmdBeginRendering(cmd, &renderInfo);
+
+	// set dynamic viewport and scissor
+	VkViewport viewport = {};
+	viewport.x = 0;
+	viewport.y = 0;
+	viewport.width = _drawExtent.width;
+	viewport.height = _drawExtent.height;
+	viewport.minDepth = 0.f;
+	viewport.maxDepth = 1.f;
+
+	vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+	VkRect2D scissor = {};
+	scissor.offset.x = 0;
+	scissor.offset.y = 0;
+	scissor.extent.width = _drawExtent.width;
+	scissor.extent.height = _drawExtent.height;
+
+	vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+	for (const Render_Graph_Node& rgn : render_graph) {
+		if (!rgn.barriers.empty()) {
+			VkDependencyInfo dep = {
+				.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+				.bufferMemoryBarrierCount = (uint32_t)rgn.barriers.size(),
+				.pBufferMemoryBarriers = rgn.barriers.data()
+			};
+
+			vkCmdPipelineBarrier2(cmd, &dep);
+		}
+
+		vkCmdBindPipeline(cmd, rgn.pass_type == Pass_Type::Compute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS, rgn.pipeline);
+		// insert timestamp / query by name
 		rgn.execute(cmd);
+		// collect timestamp
+	}
+
+	// todo move all this slop
+	vkCmdBeginRendering(cmd, &renderInfo);
+	debug_renderer.render(cmd, frame_proj * frame_view);
+	vkCmdEndRendering(cmd);
+				
+	// same
+	transition_image(cmd, _drawImage.image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+	transition_image(cmd, _swapchainImages[current_swapchain_index], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	copy_image_to_image(cmd, _drawImage.image, _swapchainImages[current_swapchain_index], _drawExtent, _swapchainExtent);
 }
 
 void Vk_Backend::end_frame_and_submit() {
@@ -1407,15 +1606,6 @@ void Vk_Backend::end_frame_and_submit() {
 }
 
 void Vk_Backend::generate_draw_commands(VkCommandBuffer cmd) {
-	vkCmdFillBuffer(cmd, command_count_buffer.buffer, 0, sizeof(Command_Counts), 0);
-
-	VkMemoryBarrier resetBarrier{};
-	resetBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-	resetBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	resetBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-
-	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &resetBarrier, 0, nullptr, 0, nullptr);
-
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, mesh_cull_pipeline);
 	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, mesh_cull_pipeline_layout, 0, 1, &mesh_cull_descriptor_set, 0, nullptr);
 
@@ -1436,74 +1626,31 @@ void Vk_Backend::generate_draw_commands(VkCommandBuffer cmd) {
 	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
 }
 
-void Vk_Backend::draw_background(VkCommandBuffer cmd) {
+void Vk_Backend::clear(VkCommandBuffer cmd) {
 	VkClearColorValue clearValue;
 	float f = std::abs(std::sin(_frameNumber / 120.f)) * .5 + .5;
 	clearValue = { { f * clear_color.x, f * clear_color.y, f * clear_color.z, clear_color.w } };
 	
 	VkImageSubresourceRange clearRange = image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
 	vkCmdClearColorImage(cmd, _drawImage.image, VK_IMAGE_LAYOUT_GENERAL, &clearValue, 1, &clearRange);
+
+	vkCmdFillBuffer(cmd, command_count_buffer.buffer, 0, sizeof(Command_Counts), 0);
+
+	VkMemoryBarrier resetBarrier{};
+	resetBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+	resetBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+	resetBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &resetBarrier, 0, nullptr, 0, nullptr);
 }
 
-// void Vk_Backend::draw_background() {
-// 	for (const Render_Graph_Node& rgn : render_graph) {
-// 		if (rgn.name == "draw_background" || 
-// 			rgn.name == "copy_to_swapchain" ||
-// 			rgn.name == "draw_imgui") {
-// 			continue;
-// 		}
-// 		rgn.execute(cmd);
-// 	}
-// }
-
 void Vk_Backend::draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view) {
-	//begin a render pass  connected to our draw image
-	VkRenderingAttachmentInfo colorAttachment = attachment_info(_drawImage.imageView, nullptr, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-	VkRenderingAttachmentInfo depthAttachment = depth_attachment_info(_depthImage.imageView, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
-
-	VkRenderingInfo renderInfo = rendering_info(_drawExtent, &colorAttachment, &depthAttachment);
-	vkCmdBeginRendering(cmd, &renderInfo);
-
-	//set dynamic viewport and scissor
-	VkViewport viewport = {};
-	viewport.x = 0;
-	viewport.y = 0;
-	viewport.width = _drawExtent.width;
-	viewport.height = _drawExtent.height;
-	viewport.minDepth = 0.f;
-	viewport.maxDepth = 1.f;
-
-	vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-	VkRect2D scissor = {};
-	scissor.offset.x = 0;
-	scissor.offset.y = 0;
-	scissor.extent.width = _drawExtent.width;
-	scissor.extent.height = _drawExtent.height;
-
-	vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-	///////////////////////////////////////////////////////////////////////////
-
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, opaque_pipeline);
-
-	VkDescriptorSet _bindlessDescriptorSet = Texture_Manager::get_bindless_descriptor_set();
-	vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, draw_pipeline_layout,
-		0, 1, &_bindlessDescriptorSet, 0, nullptr);
-
-	gpu_push_constants.projection = projection;
-	gpu_push_constants.view = view;
-	gpu_push_constants.max_lights = num_lights;
-	vkCmdPushConstants(cmd, draw_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(GPU_Push_Constants), &gpu_push_constants);
-
-	vkCmdBindIndexBuffer(cmd, index_buffer.buffer, 0, VK_INDEX_TYPE_UINT32);
-
 	// draw
 	vkCmdDrawIndexedIndirectCount(cmd, opaque_command_buffer.buffer, 0, command_count_buffer.buffer, offsetof(Command_Counts, opaque), MAX_DRAW_COMMANDS, sizeof(VkDrawIndexedIndirectCommand));
 
+	/////////////////////// todo move all of this v
 	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, transparent_pipeline);
 
-	// draw
 	vkCmdDrawIndexedIndirectCount(cmd, transparent_command_buffer.buffer, 0, command_count_buffer.buffer, offsetof(Command_Counts, transparent), MAX_DRAW_COMMANDS, sizeof(VkDrawIndexedIndirectCommand));
 
 	vkCmdEndRendering(cmd); 

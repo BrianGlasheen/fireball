@@ -357,16 +357,40 @@ struct DescriptorWriter {
 	}
 };
 
+enum class Pass_Type {
+	Compute = 0,
+	Graphics,
+};
+
+enum class Access_Type {
+	Read = 0,
+	Write,
+	ReadWrite,
+};
+
+struct Resource_Access {
+	Access_Type access_type;
+	Allocated_Buffer buffer;
+	std::string depends_on;
+	// or Render_Graph_Node*
+};
+
+struct Resource_State {
+    VkPipelineStageFlags2 stage;
+    VkAccessFlags2        access;
+};
 // template so we can use other type for constructing
 // flat topologically sorted graph where depends_on is an index
 // into flat array
 // template <typename T>
 struct Render_Graph_Node {
 	string name;
-	//vector<T> depends_on;
-	// reads
-	// writes
-	// pass type? render / compute / transfer / present?
-	// pipeline
-	std::function<void(VkCommandBuffer)> execute;
+    Pass_Type pass_type;
+    vector<Resource_Access> resource_accesses;
+    
+	VkPipeline pipeline;
+    std::function<void(VkCommandBuffer)> execute;
+
+    vector<VkBufferMemoryBarrier2> barriers;
+	vector<uint32_t> depends_on;
 };

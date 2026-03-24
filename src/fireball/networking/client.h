@@ -42,7 +42,7 @@ public:
     }
 
     void disconnect() {
-        send_packet({ NetMsg::ClientLeaving, {} });
+        send_packet({ Net_Msg::ClientLeaving, {} });
         m_sockets->CloseConnection(m_conn, 0, "Leaving", true);
         // TODO disable steam datagram sockets
     }
@@ -76,7 +76,7 @@ private:
         if (!NetPacket::deserialize(data, size, pkt)) return;
 
         switch (pkt.type) {
-            case NetMsg::ClientAccepted: {
+            case Net_Msg::ClientAccepted: {
 
                 Client_Accepted msg;
                 bool fail = NetPacket::to(pkt, msg);
@@ -87,23 +87,23 @@ private:
                 break;
             }
 
-            case NetMsg::FullSnapshot:
+            case Net_Msg::FullSnapshot:
                 printf("[CLIENT] Got snapshot (%zu bytes)\n", pkt.payload.size());
                 if (on_snapshot)
                     on_snapshot(pkt.payload.data(), pkt.payload.size());
 
                 break;
 
-            case NetMsg::DeltaUpdate:
+            case Net_Msg::DeltaUpdate:
                 // TODO: apply delta
                 break;
 
-            case NetMsg::ClientLeaving:
+            case Net_Msg::ClientLeaving:
                 printf("[CLIENT] Server is shutting down\n");
                 if (on_disconnected) on_disconnected();
                 break;            
                 
-            case NetMsg::ServerShutdown: {
+            case Net_Msg::ServerShutdown: {
                 Server_Shutdown s;
                 int fail = NetPacket::to(pkt, s);
                 s.text[sizeof(s.text) - 1] = '\0';
@@ -129,7 +129,7 @@ private:
                 printf("[CLIENT] Connected, sending hello\n");
 
                 Client_Hello msg = { "fireball-client01" } ;
-                NetPacket hello = NetPacket::from(NetMsg::ClientHello, msg);
+                NetPacket hello = NetPacket::from(Net_Msg::ClientHello, msg);
 
                 send_packet(hello);
 

@@ -154,7 +154,7 @@ public:
 	void begin_frame();
 	void generate_draw_commands(VkCommandBuffer cmd);
 	void render(const mat4& projection, const mat4& view);
-	void draw_background(VkCommandBuffer cmd);
+	void clear(VkCommandBuffer cmd);
 	void draw_geometry(VkCommandBuffer cmd, const mat4& projection, const mat4& view);
 	void draw_blank(vec4 color);
 	void end_frame_and_submit();

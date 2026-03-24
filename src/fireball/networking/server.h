@@ -58,7 +58,7 @@ public:
             Server_Shutdown shutdown {
                 .text = "Server shutdown, reason 12345"
             };
-            send_packet(conn, NetPacket::from(NetMsg::ServerShutdown,  shutdown));
+            send_packet(conn, NetPacket::from(Net_Msg::ServerShutdown,  shutdown));
             m_sockets->CloseConnection(conn, 0, "Server shutdown", true);
         }
 
@@ -78,7 +78,7 @@ public:
         auto delta = on_delta_update();
         if (delta.empty()) return;
 
-        NetPacket pkt { NetMsg::DeltaUpdate, delta };
+        NetPacket pkt { Net_Msg::DeltaUpdate, delta };
         for (auto& [conn, state] : m_clients) {
             if (state.fully_loaded)
                 send_packet(conn, pkt);
@@ -126,7 +126,7 @@ private:
         }
 
         switch (pkt.type) {
-            case NetMsg::ClientHello: {
+            case Net_Msg::ClientHello: {
                 Client_Hello msg;
                 bool fail = NetPacket::to(pkt, msg);
                 msg.name[sizeof(msg.name) - 1] = '\0';
@@ -137,12 +137,12 @@ private:
                 state.name = std::string(msg.name);
 
                 Client_Accepted sinfo { .server_name = "fireball-server", .your_id = conn, .tick_rate = 128 }; // todo change tickrate to setting
-                NetPacket packet = NetPacket::from(NetMsg::ClientAccepted, sinfo);
+                NetPacket packet = NetPacket::from(Net_Msg::ClientAccepted, sinfo);
                 send_packet(conn, packet, k_nSteamNetworkingSend_Reliable);
 
                 if (on_full_snapshot) {
                     auto snapshot = on_full_snapshot();
-                    NetPacket packet { NetMsg::FullSnapshot, snapshot };
+                    NetPacket packet { Net_Msg::FullSnapshot, snapshot };
                     printf("sending scene snapshot %zu bytes", snapshot.size());
                     send_packet(conn, packet, k_nSteamNetworkingSend_Reliable);
                 }
@@ -152,13 +152,13 @@ private:
                 break;
             }
 
-            case NetMsg::ClientInput: {
+            case Net_Msg::ClientInput: {
                 if (on_client_input)
                     on_client_input(conn, pkt.payload.data(), pkt.payload.size());
                 break;
             }
 
-            case NetMsg::ClientLeaving: {
+            case Net_Msg::ClientLeaving: {
                 Printf("Client %u sent graceful leave", conn);
                 remove_client(conn);
                 m_sockets->CloseConnection(conn, 0, "Client left", false);

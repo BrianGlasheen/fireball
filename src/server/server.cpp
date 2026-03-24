@@ -32,7 +32,7 @@ int main() {
         printf("[SERVER] '%s' joined (%zu players online)\n", name.c_str(), g_players.size());
 
         // TODO:serialize scene entity list into a snapshot buffer and send via:
-        // server.send_to(conn, { NetMsg::FullSnapshot, <scene_buffer> });
+        // server.send_to(conn, { Net_Msg::FullSnapshot, <scene_buffer> });
     };
 
     server.on_client_left = [&](HSteamNetConnection conn) {

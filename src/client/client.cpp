@@ -23,15 +23,15 @@
 static bool g_spawn_requested = false;
 
 enum class Game_State {
-	MAIN_MENU = 0,
-	CONNECTING,
-	LOADING,
-	PLAYING,
-	PAUSE_MENU,
+	MainMenu = 0,
+	Connecting,
+	Loading,
+	Playing,
+	PauseMenu,
 	NUM_GAME_STATE
 };
 
-static Game_State game_state = Game_State::MAIN_MENU;
+static Game_State game_state = Game_State::MainMenu;
 
 void mouseCallback(GLFWwindow* window, int button, int action, int mods) {
 	ImGuiIO& io = ImGui::GetIO();
@@ -183,7 +183,7 @@ int main() {
 		client.tick();
 		// check data from client to set game state
 
-		if (game_state == Game_State::MAIN_MENU) {
+		if (game_state == Game_State::MainMenu) {
 			ImGui::Begin("Main Menu", nullptr,
 				ImGuiWindowFlags_NoResize |
 				ImGuiWindowFlags_NoCollapse |
@@ -201,8 +201,8 @@ int main() {
 				fake_loading_progress = 0.0f;
 				client.connect(ip_buffer, port, name);
 				// try to connect to server
-				// set state to connecting
-				game_state = Game_State::PLAYING;
+				// set state to Connecting
+				game_state = Game_State::Playing;
 			}
 
 			ImGui::SameLine();
@@ -214,7 +214,7 @@ int main() {
 
 			renderer.draw_blank(vec4(0.4f, 0.7f, 0.2f, 1.0f));
 		}
-		else if (game_state == Game_State::LOADING) {
+		else if (game_state == Game_State::Loading) {
 			// poll server
 			// parse data
 			// do what's needed with said data
@@ -224,7 +224,7 @@ int main() {
 			fake_loading_progress += 0.005f;
 			if (fake_loading_progress >= 1.0f) {
 				fake_loading_progress = 1.0f;
-				game_state = Game_State::PLAYING;
+				game_state = Game_State::Playing;
 			}
 
 			ImGui::Begin("Loading...", nullptr,
@@ -236,13 +236,13 @@ int main() {
 			ImGui::ProgressBar(fake_loading_progress, ImVec2(300, 0));
 
 			if (ImGui::Button("Cancel"))
-				game_state = Game_State::MAIN_MENU;
+				game_state = Game_State::MainMenu;
 
 			ImGui::End();
 
 			renderer.draw_blank(vec4(0.4f, 0.2f, 0.7f, 1.0f));
 		}
-		else if (game_state == Game_State::PLAYING) {
+		else if (game_state == Game_State::Playing) {
 			fake_loading_progress = 0.0f;
 
 		// TODO stuff code in some corner
